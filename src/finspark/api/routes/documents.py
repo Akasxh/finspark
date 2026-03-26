@@ -1,0 +1,166 @@
+"""Document upload and parsing routes."""
+
+import shutil
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from finspark.api.dependencies import get_audit_service, get_document_parser, get_tenant_context
+from finspark.core.audit import AuditService
+from finspark.core.config import settings
+from finspark.core.database import get_db
+from finspark.models.document import Document
+from finspark.schemas.common import APIResponse, TenantContext
+from finspark.schemas.documents import (
+    DocumentDetailResponse,
+    DocumentUploadResponse,
+    ParsedDocumentResult,
+)
+from finspark.services.parsing.document_parser import DocumentParser
+
+router = APIRouter(prefix="/documents", tags=["Documents"])
+
+ALLOWED_EXTENSIONS = {".docx", ".pdf", ".yaml", ".yml", ".json"}
+
+
+@router.post("/upload", response_model=APIResponse[DocumentUploadResponse])
+async def upload_document(
+    file: UploadFile,
+    doc_type: str = "brd",
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    parser: DocumentParser = Depends(get_document_parser),
+    audit: AuditService = Depends(get_audit_service),
+) -> APIResponse[DocumentUploadResponse]:
+    """Upload and parse a document (BRD, SOW, API spec)."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {suffix}. Allowed: {ALLOWED_EXTENSIONS}",
+        )
+
+    # Save file
+    upload_dir = settings.upload_dir / tenant.tenant_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / file.filename
+
+    with open(file_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # Create document record
+    doc = Document(
+        tenant_id=tenant.tenant_id,
+        filename=file.filename,
+        file_type=suffix.lstrip("."),
+        file_size=file_path.stat().st_size,
+        doc_type=doc_type,
+        status="parsing",
+    )
+    db.add(doc)
+    await db.flush()
+
+    # Parse document
+    try:
+        result = parser.parse(file_path, doc_type=doc_type)
+        doc.parsed_result = result.model_dump_json()
+        doc.raw_text = result.summary[:5000]
+        doc.status = "parsed"
+    except Exception as e:
+        doc.status = "failed"
+        doc.error_message = str(e)
+
+    await db.flush()
+
+    await audit.log(
+        tenant_id=tenant.tenant_id,
+        actor=tenant.tenant_name,
+        action="upload_document",
+        resource_type="document",
+        resource_id=doc.id,
+        details={"filename": file.filename, "doc_type": doc_type, "status": doc.status},
+    )
+
+    return APIResponse(
+        success=doc.status == "parsed",
+        data=DocumentUploadResponse(
+            id=doc.id,
+            filename=doc.filename,
+            file_type=suffix.lstrip("."),
+            doc_type=doc_type,
+            status=doc.status,
+            created_at=doc.created_at,
+        ),
+        message=f"Document {doc.status}"
+        if doc.status == "parsed"
+        else doc.error_message or "Parsing failed",
+    )
+
+
+@router.get("/{document_id}", response_model=APIResponse[DocumentDetailResponse])
+async def get_document(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> APIResponse[DocumentDetailResponse]:
+    """Get document details and parsing results."""
+    stmt = select(Document).where(
+        Document.id == document_id,
+        Document.tenant_id == tenant.tenant_id,
+    )
+    result = await db.execute(stmt)
+    doc = result.scalar_one_or_none()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    parsed = None
+    if doc.parsed_result:
+        parsed = ParsedDocumentResult.model_validate_json(doc.parsed_result)
+
+    return APIResponse(
+        data=DocumentDetailResponse(
+            id=doc.id,
+            filename=doc.filename,
+            file_type=doc.file_type,
+            doc_type=doc.doc_type,
+            status=doc.status,
+            parsed_result=parsed,
+            created_at=doc.created_at,
+            updated_at=doc.updated_at,
+        ),
+    )
+
+
+@router.get("/", response_model=APIResponse[list[DocumentUploadResponse]])
+async def list_documents(
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> APIResponse[list[DocumentUploadResponse]]:
+    """List all documents for the current tenant."""
+    stmt = (
+        select(Document)
+        .where(Document.tenant_id == tenant.tenant_id)
+        .order_by(Document.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    docs = result.scalars().all()
+
+    return APIResponse(
+        data=[
+            DocumentUploadResponse(
+                id=d.id,
+                filename=d.filename,
+                file_type=d.file_type,
+                doc_type=d.doc_type,
+                status=d.status,
+                created_at=d.created_at,
+            )
+            for d in docs
+        ],
+    )

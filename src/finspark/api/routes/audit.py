@@ -1,0 +1,75 @@
+"""Audit log routes."""
+
+import json
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from finspark.api.dependencies import get_tenant_context
+from finspark.core.database import get_db
+from finspark.models.audit import AuditLog
+from finspark.schemas.audit import AuditLogResponse
+from finspark.schemas.common import APIResponse, PaginatedResponse, TenantContext
+
+router = APIRouter(prefix="/audit", tags=["Audit"])
+
+
+@router.get("/", response_model=APIResponse[PaginatedResponse[AuditLogResponse]])
+async def query_audit_logs(
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    action: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> APIResponse[PaginatedResponse[AuditLogResponse]]:
+    """Query audit logs for the current tenant."""
+    stmt = select(AuditLog).where(AuditLog.tenant_id == tenant.tenant_id)
+
+    if resource_type:
+        stmt = stmt.where(AuditLog.resource_type == resource_type)
+    if resource_id:
+        stmt = stmt.where(AuditLog.resource_id == resource_id)
+    if action:
+        stmt = stmt.where(AuditLog.action == action)
+
+    stmt = stmt.order_by(AuditLog.created_at.desc())
+
+    # Count
+    count_result = await db.execute(
+        select(AuditLog.id).where(AuditLog.tenant_id == tenant.tenant_id)
+    )
+    total = len(count_result.all())
+
+    # Paginate
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(stmt)
+    logs = result.scalars().all()
+
+    items = []
+    for log in logs:
+        details = json.loads(log.details) if log.details else None
+        items.append(
+            AuditLogResponse(
+                id=log.id,
+                tenant_id=log.tenant_id,
+                actor=log.actor,
+                action=log.action,
+                resource_type=log.resource_type,
+                resource_id=log.resource_id,
+                details=details,
+                created_at=log.created_at,
+            )
+        )
+
+    return APIResponse(
+        data=PaginatedResponse(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            has_next=(page * page_size) < total,
+        ),
+    )

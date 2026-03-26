@@ -1,0 +1,154 @@
+openapi: "3.0.3"
+info:
+  title: CIBIL Credit Bureau API
+  version: "2.0.0"
+  description: TransUnion CIBIL API for credit score and report inquiries
+servers:
+  - url: https://api.cibil.com/v2
+    description: Production
+  - url: https://sandbox.cibil.com/v2
+    description: Sandbox
+security:
+  - OAuth2: [read, write]
+paths:
+  /scores:
+    post:
+      summary: Fetch credit score
+      description: Returns credit score for an individual based on PAN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoreRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoreResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+  /reports:
+    post:
+      summary: Fetch detailed credit report
+      description: Returns full credit report with account details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+      responses:
+        '200':
+          description: Successful response
+  /batch/inquiries:
+    post:
+      summary: Batch credit inquiry
+      description: Process multiple credit inquiries in a single request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                inquiries:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ScoreRequest'
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.cibil.com/oauth/token
+          scopes:
+            read: Read access
+            write: Write access
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    ScoreRequest:
+      type: object
+      required:
+        - pan_number
+        - applicant_name
+        - dob
+        - consent_id
+      properties:
+        pan_number:
+          type: string
+          description: PAN card number
+          example: ABCDE1234F
+        applicant_name:
+          type: string
+          description: Full name of the applicant
+          example: Rajesh Kumar
+        dob:
+          type: string
+          format: date
+          description: Date of birth
+          example: "1990-05-15"
+        phone:
+          type: string
+          description: Mobile number
+          example: "+919876543210"
+        email:
+          type: string
+          format: email
+          description: Email address
+        residential_address:
+          type: string
+          description: Current residential address
+        product_type:
+          type: string
+          description: Type of loan product
+          enum: [personal_loan, home_loan, auto_loan, business_loan, credit_card]
+        requested_amount:
+          type: number
+          description: Requested loan amount
+          example: 500000
+        consent_id:
+          type: string
+          description: Consent reference ID
+    ScoreResponse:
+      type: object
+      properties:
+        credit_score:
+          type: integer
+          description: CIBIL score (300-900)
+          example: 750
+        score_range:
+          type: string
+          enum: [Poor, Fair, Good, Excellent]
+        enquiry_id:
+          type: string
+        report_id:
+          type: string
+        active_accounts:
+          type: integer
+        overdue_accounts:
+          type: integer
+        last_updated:
+          type: string
+          format: date-time
+    ReportRequest:
+      type: object
+      required:
+        - report_id
+        - consent_id
+      properties:
+        report_id:
+          type: string
+        consent_id:
+          type: string
+        include_details:
+          type: boolean
+          default: true

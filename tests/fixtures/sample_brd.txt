@@ -1,0 +1,71 @@
+Credit Bureau Integration - Business Requirements Document
+
+Project Overview
+This document outlines the requirements for integrating the CIBIL Credit Bureau API into the LendFlow lending platform to enable automated credit score checks and report generation during the loan application process.
+
+Integration Requirements
+
+1. API Endpoints Required:
+   POST /v1/credit-score - Fetch credit score for an applicant
+   POST /v1/credit-report - Fetch detailed credit report
+   POST /v1/bulk-inquiry - Batch processing for multiple applicants
+
+2. Field Mapping Requirements:
+   The following fields must be mapped from the loan application to the bureau API:
+   - applicant_name → full_name (mandatory)
+   - pan_number → pan (mandatory)
+   - date_of_birth → dob (mandatory)
+   - mobile_number → phone (optional)
+   - email_address → email (optional)
+   - residential_address → address (optional)
+   - loan_amount → requested_amount (mandatory)
+   - loan_type → product_type (mandatory)
+
+3. Authentication Requirements:
+   - API Key based authentication with certificate (mTLS)
+   - OAuth2 for v2 API
+   - Bearer token for session management
+   - API secret must be stored in encrypted vault
+
+4. Response Handling:
+   The bureau will return:
+   - credit_score: Integer (300-900)
+   - score_range: String (Poor/Fair/Good/Excellent)
+   - enquiry_id: Reference ID for the inquiry
+   - report_id: ID to fetch detailed report
+   - active_accounts: Number of active credit accounts
+   - overdue_accounts: Number of overdue accounts
+
+Data Flow
+1. User submits loan application
+2. System validates mandatory fields
+3. System calls CIBIL API with mapped fields
+4. Response is parsed and stored
+5. Credit decision is made based on score
+
+Security Requirements
+- All data must be encrypted in transit (TLS 1.2+)
+- PII data must be masked in logs
+- Audit trail for all bureau inquiries
+- PCI-DSS compliance for handling financial data
+- Data retention policy: 90 days for raw responses
+- Access control: Only authorized systems can trigger bureau calls
+
+SLA Requirements
+- Response time: 3000ms maximum
+- Availability: 99.9% uptime
+- Rate limit: 100 requests per minute
+- Timeout: 30 seconds
+
+Error Handling Requirements
+- Retry on 5xx errors with exponential backoff
+- Maximum 3 retries
+- Fallback to cached score if available (< 24 hours old)
+- Alert on consecutive failures (> 5)
+- Log all errors with correlation ID
+
+Testing Requirements
+- Unit tests for field mapping
+- Integration tests with sandbox API
+- Load testing for burst scenarios
+- Regression tests for API version changes

@@ -1,0 +1,1266 @@
+openapi: "3.1.0"
+
+info:
+  title: CIBIL CreditVision API
+  description: |
+    CIBIL TransUnion CreditVision® API Suite v2.1 for member institutions.
+    Provides real-time credit score inquiry, full Credit Information Report (CIR) pull,
+    and asynchronous bulk portfolio inquiry for licensed lending institutions.
+
+    ## Authentication
+    All endpoints require dual-layer authentication:
+    1. **API Key** — header `X-CIBIL-API-Key` (64-char alphanumeric)
+    2. **Mutual TLS** — client certificate signed by CIBIL-Member-CA-2024
+
+    The bulk inquiry endpoint additionally requires **HMAC-SHA256 request signing**.
+    See the `X-CIBIL-Signature` header documentation below.
+
+    ## Rate Limits
+    Rate limits are enforced per member account:
+    - Score inquiry: 300 requests/minute
+    - Report pull: 150 requests/minute
+    - Bulk inquiry: 10 submissions/hour
+
+    Rate limit headers are returned on all responses:
+    - `X-RateLimit-Limit`: Total allowed per minute
+    - `X-RateLimit-Remaining`: Remaining in current window
+    - `X-RateLimit-Reset`: Unix timestamp when window resets
+
+    ## Versioning
+    This document describes API version `v2`. Version `v1` (XML-based) is deprecated
+    and will reach end-of-life on 2025-12-31. Members on v1 must migrate to v2 before
+    that date. See migration guide at https://developer.cibil.com/v1-to-v2-migration.
+
+  version: "2.1.0"
+  contact:
+    name: CIBIL Member Support
+    email: member-support@cibil.com
+    url: https://developer.cibil.com
+  license:
+    name: CIBIL Member License Agreement
+    url: https://www.cibil.com/member-license
+
+servers:
+  - url: https://api.cibil.com/creditvision/v2
+    description: Production
+  - url: https://api-uat.cibil.com/creditvision/v2
+    description: UAT / Integration Testing
+
+tags:
+  - name: Score
+    description: Credit score inquiry operations
+  - name: Report
+    description: Full Credit Information Report (CIR) operations
+  - name: Bulk
+    description: Asynchronous bulk portfolio inquiry operations
+  - name: Utility
+    description: Test and diagnostic utilities (UAT environment only)
+
+security:
+  - ApiKeyAuth: []
+    MutualTLS: []
+
+paths:
+
+  /score/inquiry:
+    post:
+      operationId: scoreInquiry
+      summary: Real-time Credit Score Inquiry
+      description: |
+        Retrieves the CIBIL Score (range 300–900) and score summary for a single
+        individual consumer. This is the primary endpoint for pre-qualification
+        and loan origination decisioning.
+
+        Scores of -1 (insufficient history) and -2 (no history / No Hit) are valid
+        responses, not errors. Callers must handle these sentinel values.
+
+        This endpoint supports idempotency via the `X-Idempotency-Key` header.
+        Duplicate requests with the same key within a 60-second window return
+        the cached response and do **not** generate a new bureau hit or consume
+        rate limit quota.
+
+        Average P50 latency: 1.2 seconds. P99 hard SLA: 6 seconds. Callers should
+        configure an 8-second client-side timeout.
+      tags:
+        - Score
+      parameters:
+        - $ref: "#/components/parameters/XCibilApiKey"
+        - $ref: "#/components/parameters/XRequestTimestamp"
+        - $ref: "#/components/parameters/XIdempotencyKey"
+        - $ref: "#/components/parameters/XCorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScoreInquiryRequest"
+            examples:
+              individual_with_pan:
+                summary: Standard individual score inquiry
+                value:
+                  MemberReferenceNumber: "FS-APP-20241115-000042"
+                  ProductType: "INDV-SCR"
+                  ConsumerName:
+                    FirstName: "RAJESH KUMAR"
+                    LastName: "SHARMA"
+                  DateOfBirth: "1985-07-14"
+                  IDDetails:
+                    - IDType: "PAN"
+                      IDValue: "ABCPS1234R"
+                  PhoneNumbers:
+                    - PhoneType: "MOBILE"
+                      Number: "9876543210"
+                  Addresses:
+                    - AddressType: "CURRENT"
+                      AddressLine1: "12 MG Road"
+                      AddressLine2: "Indiranagar"
+                      City: "Bengaluru"
+                      State: "KA"
+                      PostalCode: "560038"
+                  Gender: "M"
+      responses:
+        "200":
+          description: Score inquiry processed. Check `BureauResponseCode` for result.
+          headers:
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/XRateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/XRateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/XRateLimitReset"
+            X-Correlation-Id:
+              $ref: "#/components/headers/XCorrelationIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScoreInquiryResponse"
+              examples:
+                hit_response:
+                  summary: Successful score hit
+                  value:
+                    RequestID: "CIBIL-REQ-20241115-8A3F2C1D"
+                    MemberReferenceNumber: "FS-APP-20241115-000042"
+                    BureauResponseCode: "1"
+                    EnquiryDateTime: "2024-11-15T09:23:45.123Z"
+                    SegmentType: "INDIVIDUAL"
+                    CIBILScore: 742
+                    ScoreCardVersion: "V2"
+                    ScoreReasonCodes:
+                      - "R003"
+                      - "R001"
+                    CreditSummary:
+                      TotalAccounts: 5
+                      ActiveAccounts: 3
+                      CurrentBalance: 450000
+                      TotalMonthlyPaymentAmount: 18500
+                      TotalOverdueAccounts: 0
+                      TotalOverdueBalance: 0
+                      OldestAccountOpenDate: "2015-03-01"
+                      RecentEnquiries90Days: 1
+                no_hit_response:
+                  summary: No credit history (NH)
+                  value:
+                    RequestID: "CIBIL-REQ-20241115-9B4G3D2E"
+                    MemberReferenceNumber: "FS-APP-20241115-000043"
+                    BureauResponseCode: "2"
+                    EnquiryDateTime: "2024-11-15T09:24:10.456Z"
+                    SegmentType: "INDIVIDUAL"
+                    CIBILScore: -2
+                    ScoreCardVersion: "V2"
+                    ScoreReasonCodes: []
+                    CreditSummary: null
+                ntc_response:
+                  summary: Insufficient credit history (NTC)
+                  value:
+                    RequestID: "CIBIL-REQ-20241115-7C5H4E3F"
+                    MemberReferenceNumber: "FS-APP-20241115-000044"
+                    BureauResponseCode: "3"
+                    EnquiryDateTime: "2024-11-15T09:25:30.789Z"
+                    SegmentType: "INDIVIDUAL"
+                    CIBILScore: -1
+                    ScoreCardVersion: "V2"
+                    ScoreReasonCodes:
+                      - "R008"
+                    CreditSummary:
+                      TotalAccounts: 1
+                      ActiveAccounts: 1
+                      CurrentBalance: 25000
+                      TotalMonthlyPaymentAmount: 1200
+                      TotalOverdueAccounts: 0
+                      TotalOverdueBalance: 0
+                      OldestAccountOpenDate: "2024-04-15"
+                      RecentEnquiries90Days: 2
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /report/pull:
+    post:
+      operationId: reportPull
+      summary: Full Credit Information Report (CIR) Pull
+      description: |
+        Retrieves the complete CIBIL Credit Information Report (CIR) for a consumer.
+        The CIR includes:
+        - Full account history (trade lines) with 47-month DPD grid
+        - Enquiry history (last 24 months)
+        - Public records (defaults, write-offs, settlements, suit-filed accounts)
+        - Identity verification details
+        - Score details with reason codes
+
+        **Report Size and Async Flow:**
+        Reports under 512 KB are returned synchronously with HTTP 200.
+        Reports exceeding 512 KB return HTTP 202 with a `ReportToken` field.
+        Callers must poll `GET /report/status/{report_token}` for completion.
+
+        **Enquiry Registration:**
+        This call registers a hard enquiry on the consumer's bureau record.
+        Ensure enquiry purpose (`EnquiryPurpose`) is correctly set to avoid
+        misclassified enquiries, which can negatively affect the consumer's score.
+
+        P50 latency: 2.5 seconds. P99 hard SLA: 10 seconds. Client timeout: 12 seconds.
+      tags:
+        - Report
+      parameters:
+        - $ref: "#/components/parameters/XCibilApiKey"
+        - $ref: "#/components/parameters/XRequestTimestamp"
+        - $ref: "#/components/parameters/XIdempotencyKey"
+        - $ref: "#/components/parameters/XCorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportPullRequest"
+            examples:
+              personal_loan_report:
+                summary: Full CIR pull for personal loan application
+                value:
+                  MemberReferenceNumber: "FS-APP-20241115-000042"
+                  MemberUserID: "UW-EMP-00412"
+                  ProductType: "INDV-CIR"
+                  EnquiryPurpose: "05"
+                  EnquiryAmount: 50000000
+                  ConsumerName:
+                    FirstName: "RAJESH KUMAR"
+                    LastName: "SHARMA"
+                  DateOfBirth: "1985-07-14"
+                  IDDetails:
+                    - IDType: "PAN"
+                      IDValue: "ABCPS1234R"
+                  PhoneNumbers:
+                    - PhoneType: "MOBILE"
+                      Number: "9876543210"
+                  EmailContacts:
+                    - EmailID: "rajesh.sharma@email.com"
+                  Addresses:
+                    - AddressType: "CURRENT"
+                      AddressLine1: "12 MG Road"
+                      AddressLine2: "Indiranagar"
+                      City: "Bengaluru"
+                      State: "KA"
+                      PostalCode: "560038"
+                  Gender: "M"
+      responses:
+        "200":
+          description: Full CIR returned synchronously (report size ≤ 512 KB).
+          headers:
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/XRateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/XRateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/XRateLimitReset"
+            X-Correlation-Id:
+              $ref: "#/components/headers/XCorrelationIdResponse"
+            X-Report-Size-Bytes:
+              schema:
+                type: integer
+              description: Size of the CIR payload in bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportPullResponse"
+              examples:
+                sync_cir_response:
+                  summary: Synchronous CIR response
+                  value:
+                    RequestID: "CIBIL-REQ-20241115-2D7K9F5G"
+                    MemberReferenceNumber: "FS-APP-20241115-000042"
+                    BureauResponseCode: "1"
+                    IsAsync: false
+                    ReportToken: null
+                    CIRReportDataLst:
+                      - CIRReportData:
+                          ScoreDetails:
+                            - Name: "CIBIL TransUnion Score"
+                              Value: "742"
+                              Version: "V2"
+                              ReasonCodes:
+                                - ReasonCode: "R003"
+                                  ReasonDescription: "High credit utilization on revolving accounts"
+                                - ReasonCode: "R001"
+                                  ReasonDescription: "Length of credit history is short"
+                          IDAndContactInfo:
+                            PersonalInfo:
+                              Name:
+                                FirstName: "RAJESH KUMAR"
+                                LastName: "SHARMA"
+                                FullName: "RAJESH KUMAR SHARMA"
+                              DateOfBirth: "1985-07-14"
+                              Gender: "M"
+                          RetailAccountDetails:
+                            - AccountNumber: "HDFC****1234"
+                              MemberName: "HDFC Bank"
+                              AccountType: "CC"
+                              OwnershipType: "Individual"
+                              DateOpened: "2018-05-01"
+                              DateClosed: null
+                              DateReported: "2024-10-31"
+                              HighestCredit: 200000
+                              CurrentBalance: 145000
+                              AmountOverdue: 0
+                              PaymentHistory47: "111111111111111111111111111111111111111111111111"
+                              SuitFiled: "N"
+                              WrittenOff: "N"
+                          EnquiryDetails:
+                            - EnquiryDate: "2024-09-10"
+                              MemberName: "FinSpark Lending Pvt Ltd"
+                              EnquiryPurpose: "05"
+                              EnquiryAmount: 50000000
+                          PublicRecords: []
+                          Header:
+                            ReportDate: "2024-11-15"
+                            SubjectSegmentIndicator: "I"
+                            CIBILReportOrderNumber: "CIBIL-CIR-2024111500042"
+        "202":
+          description: |
+            Report generation initiated asynchronously (report size > 512 KB).
+            Poll `GET /report/status/{report_token}` for completion.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncReportAccepted"
+              examples:
+                async_accepted:
+                  summary: Async report initiated
+                  value:
+                    RequestID: "CIBIL-REQ-20241115-3E8L0G6H"
+                    MemberReferenceNumber: "FS-APP-20241115-000099"
+                    BureauResponseCode: "1"
+                    IsAsync: true
+                    ReportToken: "RT-20241115-ABCDEFGH1234567890"
+                    EstimatedReadySeconds: 45
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /inquiry/bulk:
+    post:
+      operationId: bulkInquiry
+      summary: Asynchronous Bulk Portfolio Inquiry
+      description: |
+        Submits a batch of up to 5,000 PAN-identified consumers for asynchronous
+        credit score retrieval. Designed for overnight portfolio monitoring,
+        Early Warning System (EWS) refresh, and collections risk assessment.
+
+        **Response Delivery:**
+        Results are NOT returned in the HTTP response body. Upon receiving HTTP 202,
+        CIBIL will POST results to the `CallbackURL` specified in the request within
+        4 hours of batch submission.
+
+        **Request Signing (Required):**
+        This endpoint requires HMAC-SHA256 request signing in addition to API Key + mTLS:
+        - Sign the concatenation of: `X-CIBIL-API-Key` value + `X-Request-Timestamp`
+          value + SHA-256 hex digest of the request body.
+        - Set the result as the value of the `X-CIBIL-Signature` header.
+        - Use the HMAC secret key from your member portal. Store it in Vault; never
+          in source code or environment variables.
+
+        **Webhook Validation:**
+        The callback POST will contain an `X-CIBIL-Webhook-Signature` header.
+        Validate it using the same HMAC-SHA256 algorithm before processing results.
+      tags:
+        - Bulk
+      parameters:
+        - $ref: "#/components/parameters/XCibilApiKey"
+        - $ref: "#/components/parameters/XRequestTimestamp"
+        - $ref: "#/components/parameters/XCibilSignature"
+        - $ref: "#/components/parameters/XCorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkInquiryRequest"
+            examples:
+              portfolio_refresh_batch:
+                summary: Bulk portfolio monitoring batch
+                value:
+                  BatchReferenceNumber: "550e8400-e29b-41d4-a716-446655440001"
+                  CallbackURL: "https://api.finspark.in/webhooks/bureau/bulk-results"
+                  NotificationEmail: "bureau-ops@finspark.in"
+                  Inquiries:
+                    - IDValue: "ABCPS1234R"
+                      ConsumerName: "RAJESH KUMAR SHARMA"
+                      DateOfBirth: "1985-07-14"
+                      MemberReferenceNumber: "FS-LOAN-2023-019234"
+                    - IDValue: "XYZQT5678M"
+                      ConsumerName: "PRIYA SUNDAR"
+                      DateOfBirth: "1990-02-28"
+                      MemberReferenceNumber: "FS-LOAN-2023-019235"
+      responses:
+        "202":
+          description: |
+            Batch accepted for processing. Results will be delivered to the
+            registered `CallbackURL` within 4 hours.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/XCorrelationIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkInquiryAccepted"
+              examples:
+                batch_accepted:
+                  summary: Batch accepted
+                  value:
+                    BatchReferenceNumber: "550e8400-e29b-41d4-a716-446655440001"
+                    CIBILBatchID: "CIBIL-BATCH-20241115-0012"
+                    RecordsAccepted: 5000
+                    RecordsRejected: 0
+                    EstimatedCompletionIST: "2024-11-16T06:00:00+05:30"
+                    RejectedRecords: []
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          description: Batch exceeds 5,000 record limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /report/status/{report_token}:
+    get:
+      operationId: reportStatus
+      summary: Poll Async Report Status
+      description: |
+        Polls the status of an asynchronous report generation request.
+        Use the `ReportToken` received in the HTTP 202 response from `POST /report/pull`.
+
+        Recommended polling strategy: exponential backoff starting at 5 seconds,
+        doubling each attempt (5s, 10s, 20s), maximum 3 attempts.
+        If status is still `PENDING` after 3 attempts, alert for manual review.
+      tags:
+        - Report
+      parameters:
+        - $ref: "#/components/parameters/XCibilApiKey"
+        - name: report_token
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^RT-[0-9]{8}-[A-Z0-9]{20}$"
+          description: Report token received from async report pull response.
+          example: "RT-20241115-ABCDEFGH1234567890"
+      responses:
+        "200":
+          description: Status returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportStatusResponse"
+              examples:
+                completed:
+                  summary: Report ready
+                  value:
+                    ReportToken: "RT-20241115-ABCDEFGH1234567890"
+                    Status: "COMPLETED"
+                    RequestID: "CIBIL-REQ-20241115-3E8L0G6H"
+                    ReportSizeBytes: 680420
+                    CIRReportDataLst:
+                      - CIRReportData: {}
+                pending:
+                  summary: Still generating
+                  value:
+                    ReportToken: "RT-20241115-ABCDEFGH1234567890"
+                    Status: "PENDING"
+                    RequestID: "CIBIL-REQ-20241115-3E8L0G6H"
+                    ReportSizeBytes: null
+                    CIRReportDataLst: null
+                failed:
+                  summary: Generation failed
+                  value:
+                    ReportToken: "RT-20241115-ABCDEFGH1234567890"
+                    Status: "FAILED"
+                    RequestID: "CIBIL-REQ-20241115-3E8L0G6H"
+                    FailureReason: "INTERNAL_ERROR"
+                    ReportSizeBytes: null
+                    CIRReportDataLst: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Report token not found or expired (tokens expire after 1 hour).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /test/simulate-error:
+    post:
+      operationId: testSimulateError
+      summary: Simulate Error Response (UAT Only)
+      description: |
+        Forces the API to return a specific BureauResponseCode or HTTP status code.
+        Available in UAT environment only. Returns HTTP 403 in production.
+        Used for integration testing of error handling and retry logic.
+      tags:
+        - Utility
+      parameters:
+        - $ref: "#/components/parameters/XCibilApiKey"
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: ["4", "5", "6", "8", "51", "52", "99", "500", "503"]
+          description: BureauResponseCode or HTTP status to simulate.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Simulated response body per requested code.
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-CIBIL-API-Key
+      description: |
+        64-character alphanumeric API key issued per member account.
+        Rotate every 90 days. Store in HashiCorp Vault; never in source code.
+    MutualTLS:
+      type: mutualTLS
+      description: |
+        Client certificate signed by CIBIL-Member-CA-2024.
+        X.509 v3, RSA-4096 or ECDSA P-384. Valid for 1 year.
+        Renew 30 days before expiry.
+
+  parameters:
+    XCibilApiKey:
+      name: X-CIBIL-API-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9]{64}$"
+      description: Member API key. Retrieved from HashiCorp Vault at runtime.
+
+    XRequestTimestamp:
+      name: X-Request-Timestamp
+      in: header
+      required: true
+      schema:
+        type: string
+        format: date-time
+      description: |
+        UTC ISO 8601 timestamp of request. Must be within ±5 minutes of server
+        time. Requests outside this window are rejected with HTTP 401.
+      example: "2024-11-15T09:23:44.000Z"
+
+    XIdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: |
+        UUID v4 idempotency key. Duplicate requests with the same key within
+        a 60-second window return a cached response without a new bureau hit.
+      example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+
+    XCibilSignature:
+      name: X-CIBIL-Signature
+      in: header
+      required: true
+      schema:
+        type: string
+      description: |
+        HMAC-SHA256 signature. Computed as:
+        HMAC-SHA256(key=HMAC_SECRET,
+          data=API_KEY + REQUEST_TIMESTAMP + SHA256_HEX(request_body))
+        Where HMAC_SECRET is the member's signing secret from the member portal.
+
+    XCorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: |
+        Caller-assigned correlation ID for distributed tracing. If not provided,
+        CIBIL generates one. Always echoed in the response.
+
+  headers:
+    XRateLimitLimit:
+      schema:
+        type: integer
+      description: Total rate limit for this endpoint per minute.
+    XRateLimitRemaining:
+      schema:
+        type: integer
+      description: Remaining requests in current rate limit window.
+    XRateLimitReset:
+      schema:
+        type: integer
+        format: int64
+      description: Unix timestamp (seconds) when the rate limit window resets.
+    XCorrelationIdResponse:
+      schema:
+        type: string
+        format: uuid
+      description: Correlation ID for this request, for distributed tracing.
+
+  schemas:
+
+    ConsumerName:
+      type: object
+      required:
+        - LastName
+      properties:
+        FirstName:
+          type: string
+          maxLength: 100
+          description: All name tokens except the last. Empty string for single-token names.
+          example: "RAJESH KUMAR"
+        LastName:
+          type: string
+          maxLength: 100
+          description: Last name token.
+          example: "SHARMA"
+
+    IDDetail:
+      type: object
+      required:
+        - IDType
+        - IDValue
+      properties:
+        IDType:
+          type: string
+          enum: ["PAN", "VOTER_ID", "PASSPORT", "DRIVING_LICENSE", "AADHAAR_LAST4"]
+          description: Type of government-issued identifier.
+        IDValue:
+          type: string
+          maxLength: 30
+          description: |
+            Identifier value. For PAN: must match `^[A-Z]{5}[0-9]{4}[A-Z]{1}$`.
+            For AADHAAR_LAST4: only last 4 digits (do not send full Aadhaar number).
+          example: "ABCPS1234R"
+
+    PhoneNumber:
+      type: object
+      required:
+        - PhoneType
+        - Number
+      properties:
+        PhoneType:
+          type: string
+          enum: ["MOBILE", "HOME", "OFFICE"]
+        Number:
+          type: string
+          pattern: "^[0-9]{10}$"
+          description: 10-digit number without country code or leading zero.
+
+    EmailContact:
+      type: object
+      required:
+        - EmailID
+      properties:
+        EmailID:
+          type: string
+          format: email
+          maxLength: 80
+
+    Address:
+      type: object
+      required:
+        - AddressType
+        - AddressLine1
+        - City
+        - State
+        - PostalCode
+      properties:
+        AddressType:
+          type: string
+          enum: ["CURRENT", "PERMANENT", "OFFICE"]
+        AddressLine1:
+          type: string
+          maxLength: 100
+        AddressLine2:
+          type: string
+          maxLength: 100
+        City:
+          type: string
+          maxLength: 50
+        State:
+          type: string
+          pattern: "^[A-Z]{2}$"
+          description: 2-char ISO 3166-2:IN state code (e.g., KA, MH, DL, TN).
+        PostalCode:
+          type: string
+          pattern: "^[0-9]{6}$"
+
+    ScoreInquiryRequest:
+      type: object
+      required:
+        - MemberReferenceNumber
+        - ProductType
+        - ConsumerName
+        - DateOfBirth
+        - IDDetails
+        - Addresses
+      properties:
+        MemberReferenceNumber:
+          type: string
+          maxLength: 30
+          description: Member's internal reference (loan application ID). Used for reconciliation.
+          example: "FS-APP-20241115-000042"
+        ProductType:
+          type: string
+          enum: ["INDV-SCR"]
+          description: Must be `INDV-SCR` for score-only inquiry.
+        ConsumerName:
+          $ref: "#/components/schemas/ConsumerName"
+        DateOfBirth:
+          type: string
+          format: date
+          description: ISO 8601 date (YYYY-MM-DD). Must match bureau records exactly.
+          example: "1985-07-14"
+        Gender:
+          type: string
+          enum: ["M", "F", "T"]
+          description: Optional. Improves match accuracy.
+        IDDetails:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/IDDetail"
+          description: At least one ID required. PAN strongly preferred for accurate matching.
+        PhoneNumbers:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/PhoneNumber"
+        Addresses:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/Address"
+
+    ScoreInquiryResponse:
+      type: object
+      required:
+        - RequestID
+        - MemberReferenceNumber
+        - BureauResponseCode
+        - EnquiryDateTime
+        - CIBILScore
+        - ScoreCardVersion
+      properties:
+        RequestID:
+          type: string
+          description: CIBIL-assigned unique request identifier. Store for audit; never expose in downstream APIs.
+          example: "CIBIL-REQ-20241115-8A3F2C1D"
+        MemberReferenceNumber:
+          type: string
+          description: Echo of request field for reconciliation.
+        BureauResponseCode:
+          type: string
+          description: |
+            Result code. Key values:
+            - `1`: Success (score returned)
+            - `2`: No Hit (no records found)
+            - `3`: NTC (insufficient history)
+            - `4`: Multiple matches
+            - `5`: Account suspended
+            - `6`: Invalid input
+            - `7`: Duplicate request
+            - `8`: Credit freeze active
+            - `51`: Rate limit exceeded
+            - `52`: Service unavailable
+            - `99`: Unknown error
+          enum: ["1","2","3","4","5","6","7","8","51","52","99"]
+        EnquiryDateTime:
+          type: string
+          format: date-time
+          description: UTC timestamp of enquiry registration.
+        SegmentType:
+          type: string
+          enum: ["INDIVIDUAL", "NTC"]
+          description: Consumer segment classification.
+        CIBILScore:
+          type: integer
+          description: |
+            CIBIL Score. Interpretation:
+            - 300–900: Valid score
+            - -1: Insufficient history (NTC)
+            - -2: No records (NH / No Hit)
+            - 0: Score computation error
+            - 999: Credit freeze
+        ScoreCardVersion:
+          type: string
+          description: Scorecard model version used.
+          example: "V2"
+        ScoreReasonCodes:
+          type: array
+          maxItems: 4
+          items:
+            type: string
+            pattern: "^R[0-9]{3}$"
+          description: Up to 4 reason codes. See reason code mapping table.
+        CreditSummary:
+          $ref: "#/components/schemas/CreditSummary"
+          nullable: true
+        ErrorDetails:
+          type: array
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+          description: Field-level validation errors (present when BureauResponseCode = 6).
+
+    CreditSummary:
+      type: object
+      properties:
+        TotalAccounts:
+          type: integer
+        ActiveAccounts:
+          type: integer
+        CurrentBalance:
+          type: integer
+          description: Total outstanding balance across all accounts, in INR.
+        TotalMonthlyPaymentAmount:
+          type: integer
+          description: Sum of all monthly instalments / minimum dues, in INR.
+        TotalOverdueAccounts:
+          type: integer
+        TotalOverdueBalance:
+          type: integer
+          description: Total overdue amount across all accounts, in INR.
+        OldestAccountOpenDate:
+          type: string
+          format: date
+        RecentEnquiries90Days:
+          type: integer
+          description: Number of hard enquiries in the past 90 days.
+
+    ReportPullRequest:
+      allOf:
+        - $ref: "#/components/schemas/ScoreInquiryRequest"
+        - type: object
+          required:
+            - MemberUserID
+            - EnquiryPurpose
+            - EnquiryAmount
+          properties:
+            ProductType:
+              type: string
+              enum: ["INDV-CIR"]
+              description: Must be `INDV-CIR` for full report pull.
+            MemberUserID:
+              type: string
+              maxLength: 20
+              description: Employee ID of the underwriter initiating the pull.
+              example: "UW-EMP-00412"
+            EnquiryPurpose:
+              type: string
+              description: |
+                Loan purpose code. Key values:
+                - `01`: Home Loan
+                - `02`: Loan Against Property
+                - `04`: Auto Loan
+                - `05`: Personal Loan
+                - `06`: MSME Term Loan
+                - `07`: MSME Working Capital
+                - `08`: Education Loan
+                - `09`: Two-Wheeler Loan
+                - `10`: Credit Card
+              pattern: "^[0-9]{2}$"
+              example: "05"
+            EnquiryAmount:
+              type: integer
+              description: Loan amount in INR paise (multiply rupees × 100).
+              minimum: 100
+              example: 50000000
+            EmailContacts:
+              type: array
+              maxItems: 2
+              items:
+                $ref: "#/components/schemas/EmailContact"
+
+    ReportPullResponse:
+      type: object
+      required:
+        - RequestID
+        - MemberReferenceNumber
+        - BureauResponseCode
+        - IsAsync
+      properties:
+        RequestID:
+          type: string
+          example: "CIBIL-REQ-20241115-2D7K9F5G"
+        MemberReferenceNumber:
+          type: string
+        BureauResponseCode:
+          type: string
+          enum: ["1","2","3","4","5","6","7","8","51","52","99"]
+        IsAsync:
+          type: boolean
+          description: True if report generation is asynchronous (size > 512 KB).
+        ReportToken:
+          type: string
+          nullable: true
+          description: Present only when IsAsync = true.
+          example: null
+        CIRReportDataLst:
+          type: array
+          nullable: true
+          description: Full CIR data. Null when IsAsync = true.
+          items:
+            $ref: "#/components/schemas/CIRReportWrapper"
+
+    AsyncReportAccepted:
+      type: object
+      required:
+        - RequestID
+        - MemberReferenceNumber
+        - BureauResponseCode
+        - IsAsync
+        - ReportToken
+      properties:
+        RequestID:
+          type: string
+        MemberReferenceNumber:
+          type: string
+        BureauResponseCode:
+          type: string
+        IsAsync:
+          type: boolean
+          enum: [true]
+        ReportToken:
+          type: string
+          pattern: "^RT-[0-9]{8}-[A-Z0-9]{20}$"
+          example: "RT-20241115-ABCDEFGH1234567890"
+        EstimatedReadySeconds:
+          type: integer
+          description: Estimated seconds until report is ready.
+
+    ReportStatusResponse:
+      type: object
+      required:
+        - ReportToken
+        - Status
+        - RequestID
+      properties:
+        ReportToken:
+          type: string
+        Status:
+          type: string
+          enum: ["PENDING", "COMPLETED", "FAILED"]
+        RequestID:
+          type: string
+        ReportSizeBytes:
+          type: integer
+          nullable: true
+        FailureReason:
+          type: string
+          nullable: true
+          enum: ["INTERNAL_ERROR", "DATA_NOT_FOUND", "TIMEOUT"]
+        CIRReportDataLst:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/CIRReportWrapper"
+
+    CIRReportWrapper:
+      type: object
+      properties:
+        CIRReportData:
+          type: object
+          description: Full CIR data object. Schema abbreviated — see CIBIL CIR schema v2.1 documentation.
+          properties:
+            ScoreDetails:
+              type: array
+              items:
+                type: object
+                properties:
+                  Name:
+                    type: string
+                  Value:
+                    type: string
+                    description: Score as string. Parse to integer.
+                  Version:
+                    type: string
+                  ReasonCodes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ReasonCode:
+                          type: string
+                        ReasonDescription:
+                          type: string
+            IDAndContactInfo:
+              type: object
+            RetailAccountDetails:
+              type: array
+              items:
+                type: object
+            EnquiryDetails:
+              type: array
+              items:
+                type: object
+            PublicRecords:
+              type: array
+              items:
+                type: object
+            Header:
+              type: object
+              properties:
+                ReportDate:
+                  type: string
+                  format: date
+                SubjectSegmentIndicator:
+                  type: string
+                  enum: ["I", "C"]
+                CIBILReportOrderNumber:
+                  type: string
+
+    BulkInquiryRecord:
+      type: object
+      required:
+        - IDValue
+        - ConsumerName
+        - DateOfBirth
+        - MemberReferenceNumber
+      properties:
+        IDValue:
+          type: string
+          pattern: "^[A-Z]{5}[0-9]{4}[A-Z]{1}$"
+          description: PAN number (validated client-side before submission).
+        ConsumerName:
+          type: string
+          maxLength: 100
+        DateOfBirth:
+          type: string
+          format: date
+        MemberReferenceNumber:
+          type: string
+          maxLength: 30
+          description: FinSpark loan account ID for reconciliation.
+
+    BulkInquiryRequest:
+      type: object
+      required:
+        - BatchReferenceNumber
+        - CallbackURL
+        - Inquiries
+      properties:
+        BatchReferenceNumber:
+          type: string
+          format: uuid
+          description: UUID v4 batch identifier generated by the caller.
+        CallbackURL:
+          type: string
+          format: uri
+          description: |
+            HTTPS URL to receive batch results. Must exactly match the URL
+            pre-registered with CIBIL in the member portal. Mismatches result in HTTP 403.
+          example: "https://api.finspark.in/webhooks/bureau/bulk-results"
+        NotificationEmail:
+          type: string
+          format: email
+          description: Optional. Email notified when batch processing completes or fails.
+          example: "bureau-ops@finspark.in"
+        Inquiries:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            $ref: "#/components/schemas/BulkInquiryRecord"
+
+    BulkInquiryAccepted:
+      type: object
+      required:
+        - BatchReferenceNumber
+        - CIBILBatchID
+        - RecordsAccepted
+        - RecordsRejected
+      properties:
+        BatchReferenceNumber:
+          type: string
+          format: uuid
+        CIBILBatchID:
+          type: string
+          description: CIBIL-assigned batch identifier for tracking.
+        RecordsAccepted:
+          type: integer
+        RecordsRejected:
+          type: integer
+        EstimatedCompletionIST:
+          type: string
+          format: date-time
+          description: Estimated completion timestamp in IST (UTC+5:30).
+        RejectedRecords:
+          type: array
+          description: Details of rejected records (PAN format errors, etc.).
+          items:
+            type: object
+            properties:
+              MemberReferenceNumber:
+                type: string
+              RejectionReason:
+                type: string
+
+    ErrorDetail:
+      type: object
+      properties:
+        FieldName:
+          type: string
+          description: API request field that caused the error.
+        ErrorCode:
+          type: string
+        ErrorDescription:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - ErrorCode
+        - ErrorMessage
+        - RequestID
+      properties:
+        ErrorCode:
+          type: string
+          example: "INVALID_PAN_FORMAT"
+        ErrorMessage:
+          type: string
+          example: "PAN value ABCPS123R does not match required format [A-Z]{5}[0-9]{4}[A-Z]{1}"
+        RequestID:
+          type: string
+          description: CIBIL request ID (if assigned before error). May be null for early failures.
+          nullable: true
+        ErrorDetails:
+          type: array
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+
+  responses:
+    BadRequest:
+      description: Request validation failed. Do not retry without fixing the request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: |
+        Authentication failed. Either the API key is invalid/expired, the
+        client certificate is missing/untrusted, or the timestamp is out of range.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: |
+        Authorization failed. The authenticated member does not have permission
+        for this operation, or the client certificate CN does not match the
+        member account.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    UnprocessableEntity:
+      description: |
+        Request is syntactically valid but semantically unprocessable
+        (e.g., PAN matches multiple consumers).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    RateLimitExceeded:
+      description: Rate limit exceeded. Respect the `Retry-After` header.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InternalServerError:
+      description: CIBIL internal error. Retry with exponential backoff (max 3 attempts).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    ServiceUnavailable:
+      description: |
+        CIBIL service temporarily unavailable. Retry with exponential backoff.
+        If persists > 5 minutes, activate degraded mode per integration SLA.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
