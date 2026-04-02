@@ -146,3 +146,98 @@ class TestIntegrationSimulator:
         steps = simulator.run_simulation(sample_config)
         for step in steps:
             assert step.duration_ms >= 0
+
+
+class TestAdapterAwareMockServer:
+    def test_cibil_endpoint_returns_realistic_response(self, mock_server: MockAPIServer) -> None:
+        response = mock_server.generate_response(
+            endpoint={"path": "/credit-score", "method": "POST"},
+            request_payload={"pan_number": "ABCDE1234F"},
+            config={"adapter_name": "CIBIL Credit Bureau"},
+        )
+        assert "credit_score" in response
+        assert 300 <= response["credit_score"] <= 899
+
+    def test_kyc_endpoint_returns_realistic_response(self, mock_server: MockAPIServer) -> None:
+        response = mock_server.generate_response(
+            endpoint={"path": "/verify/aadhaar", "method": "POST"},
+            request_payload={"aadhaar_number": "234100000001"},
+            config={"adapter_name": "Aadhaar eKYC Provider"},
+        )
+        assert response["verification_status"] == "verified"
+        assert "address" in response
+
+    def test_gst_endpoint_returns_realistic_response(self, mock_server: MockAPIServer) -> None:
+        response = mock_server.generate_response(
+            endpoint={"path": "/verify/gstin", "method": "POST"},
+            request_payload={"gstin": "29ABCDE1234F1ZK"},
+            config={"adapter_name": "GST Verification Service"},
+        )
+        assert response["taxpayer_type"] == "Regular"
+        assert response["status"] == "Active"
+
+    def test_fraud_endpoint_returns_realistic_response(self, mock_server: MockAPIServer) -> None:
+        response = mock_server.generate_response(
+            endpoint={"path": "/score", "method": "POST"},
+            request_payload={"customer_id": "CUST001", "transaction_amount": 50000},
+            config={"adapter_name": "Fraud Detection Engine"},
+        )
+        assert "fraud_score" in response
+        assert "risk_level" in response
+
+    def test_fallback_when_no_adapter_name(self, mock_server: MockAPIServer) -> None:
+        response = mock_server.generate_response(
+            endpoint={"path": "/test", "method": "GET"},
+            request_payload={},
+        )
+        assert response["status"] == "success"
+
+    def test_fallback_with_unknown_adapter(self, mock_server: MockAPIServer) -> None:
+        response = mock_server.generate_response(
+            endpoint={"path": "/test", "method": "GET"},
+            request_payload={},
+            config={"adapter_name": "Unknown"},
+        )
+        assert response["status"] == "success"
+        assert response["adapter"] == "Unknown"
+
+    def test_base_url_fallback_routing(self, mock_server: MockAPIServer) -> None:
+        """When adapter_name is a UUID, fall back to base_url matching."""
+        response = mock_server.generate_response(
+            endpoint={"path": "/credit-score", "method": "POST"},
+            request_payload={"pan_number": "ABCDE1234F"},
+            config={
+                "adapter_name": "some-uuid-not-a-real-name",
+                "base_url": "https://api.cibil.com/v1",
+            },
+        )
+        assert "credit_score" in response
+        assert 300 <= response["credit_score"] <= 899
+
+    def test_simulation_with_adapter_name_in_config(self, simulator: IntegrationSimulator) -> None:
+        config = {
+            "adapter_name": "CIBIL Credit Bureau",
+            "version": "v1",
+            "base_url": "https://api.cibil.com/v1",
+            "auth": {"type": "api_key", "credentials": {}},
+            "endpoints": [
+                {"path": "/credit-score", "method": "POST", "enabled": True},
+            ],
+            "field_mappings": [
+                {"source_field": "pan_number", "target_field": "pan", "confidence": 1.0},
+                {"source_field": "full_name", "target_field": "name", "confidence": 0.9},
+                {"source_field": "date_of_birth", "target_field": "dob", "confidence": 0.95},
+            ],
+            "hooks": [],
+            "retry_policy": {"max_retries": 3, "backoff_factor": 2, "retry_on_status": [429, 500]},
+            "timeout_ms": 30000,
+        }
+        steps = simulator.run_simulation(config)
+        # Find the endpoint test step
+        endpoint_step = next(
+            (s for s in steps if s.step_name == "endpoint_test_/credit-score"), None
+        )
+        assert endpoint_step is not None
+        assert endpoint_step.status == "passed"
+        assert "credit_score" in endpoint_step.actual_response
+        assert 300 <= endpoint_step.actual_response["credit_score"] <= 899

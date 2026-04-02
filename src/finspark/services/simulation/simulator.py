@@ -40,8 +40,25 @@ class MockAPIServer:
         endpoint: dict[str, Any],
         request_payload: dict[str, Any],
         response_schema: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Generate a mock response for an endpoint."""
+        """Generate a mock response for an endpoint.
+
+        If config contains adapter_name, uses adapter-specific generators
+        for realistic responses. Falls back to schema-based or default.
+        """
+        from finspark.services.simulation.mock_responses import generate_mock_response
+
+        adapter_name = (config or {}).get("adapter_name", "")
+        base_url = (config or {}).get("base_url", "")
+        if adapter_name or base_url:
+            return generate_mock_response(
+                adapter_name=adapter_name,
+                endpoint_path=endpoint.get("path", ""),
+                request_payload=request_payload,
+                base_url=base_url,
+            )
+
         if response_schema:
             return self._generate_from_schema(response_schema)
 
@@ -277,7 +294,7 @@ class IntegrationSimulator:
         """Test a single endpoint with mock data."""
         start = time.monotonic()
         request_payload = self._build_sample_request(config)
-        response = self.mock_server.generate_response(endpoint, request_payload)
+        response = self.mock_server.generate_response(endpoint, request_payload, config=config)
         duration = int((time.monotonic() - start) * 1000)
 
         has_status = "status" in response
