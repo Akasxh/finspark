@@ -12,30 +12,24 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from datetime import datetime
-from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
 from finspark.api.deps import (
     CurrentUser,
     DbDep,
     PaginationDep,
     TenantCtx,
-    UserContext,
-    require_roles,
 )
 from finspark.schemas.common import MessageResponse
 from finspark.schemas.hooks import (
     HookCreate,
     HookDeliveryListResponse,
-    HookDeliveryRecord,
     HookListResponse,
     HookRecord,
     HookSecret,
-    HookStatus,
     HookUpdate,
 )
 

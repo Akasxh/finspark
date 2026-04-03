@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import io
 import json
-import re
 from pathlib import Path
 from typing import Any, Union
 
@@ -32,7 +31,6 @@ from finspark.models.parsed_document import (
     HttpMethod,
     ParsedDocument,
     SectionCategory,
-    TableData,
 )
 
 

@@ -24,7 +24,6 @@ from finspark.models.base import Base, JSONBType, SoftDeleteMixin, TimestampMixi
 
 if TYPE_CHECKING:
     from finspark.models.adapter import AdapterVersion
-    from finspark.models.document import Document
     from finspark.models.simulation import Simulation
 
 

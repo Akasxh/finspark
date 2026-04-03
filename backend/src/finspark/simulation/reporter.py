@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from finspark.simulation.types import SimulationReport, StepResult, StepStatus

@@ -15,7 +15,6 @@ import httpx
 import structlog
 
 from finspark.simulation.contract import validate_contract
-from finspark.simulation.mock_server import generate_mock_response
 from finspark.simulation.rollback import RollbackManager
 from finspark.simulation.sandbox import Sandbox, SandboxRegistry
 from finspark.simulation.types import (

@@ -7,7 +7,6 @@ GET    /documents/{document_id}/raw  — stream original file bytes
 """
 from __future__ import annotations
 
-import asyncio
 import datetime
 import uuid
 from pathlib import Path, PurePosixPath
@@ -17,10 +16,8 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.api.deps import (
-    CurrentUser,
     DbDep,
     PaginationDep,
     TenantCtx,
@@ -28,7 +25,7 @@ from finspark.api.deps import (
     require_roles,
 )
 from finspark.core.config import settings
-from finspark.schemas.common import MessageResponse, PaginatedResponse
+from finspark.schemas.common import MessageResponse
 from finspark.schemas.documents import (
     DocumentDetail,
     DocumentListResponse,

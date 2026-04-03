@@ -17,14 +17,3 @@ class AuditLogResponse(BaseModel):
     resource_id: str
     details: dict[str, Any] | None = None
     created_at: datetime
-
-
-class AuditLogQuery(BaseModel):
-    resource_type: str | None = None
-    resource_id: str | None = None
-    actor: str | None = None
-    action: str | None = None
-    start_date: datetime | None = None
-    end_date: datetime | None = None
-    page: int = 1
-    page_size: int = 50

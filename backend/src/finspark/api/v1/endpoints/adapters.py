@@ -16,13 +16,11 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.api.deps import (
     CurrentUser,
     DbDep,
     PaginationDep,
-    TenantCtx,
     UserContext,
     require_roles,
 )
@@ -33,7 +31,6 @@ from finspark.schemas.adapters import (
     AdapterRecord,
     AdapterUpdate,
     AdapterVersionListResponse,
-    AdapterVersionSummary,
 )
 from finspark.schemas.common import MessageResponse
 

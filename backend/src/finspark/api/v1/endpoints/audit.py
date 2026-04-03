@@ -14,7 +14,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, HTTPException, Query, status
 
-from finspark.api.deps import CurrentUser, DbDep, PaginationDep, TenantCtx
+from finspark.api.deps import DbDep, PaginationDep, TenantCtx
 from finspark.schemas.audit import (
     AuditAction,
     AuditListResponse,

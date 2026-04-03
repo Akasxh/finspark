@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import json
 import random
-import re
 import string
 import time
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 

@@ -43,13 +43,3 @@ class SimulationResponse(BaseModel):
     duration_ms: int | None = None
     steps: list[SimulationStepResult] = []
     created_at: datetime
-
-
-class ParallelVersionResult(BaseModel):
-    """Result of testing the same request against multiple API versions."""
-
-    endpoint: str
-    versions_tested: list[str]
-    results: dict[str, SimulationStepResult]
-    compatible: bool
-    differences: list[dict[str, Any]] = []
