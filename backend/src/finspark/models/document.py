@@ -22,7 +22,6 @@ class Document(TimestampMixin, SoftDeleteMixin, Base):
     tenant_id: Mapped[str] = mapped_column(
         String(36),
         nullable=False,
-        index=True,
         comment="Owning tenant (not FK — tenant table may be in separate schema)",
     )
     filename: Mapped[str] = mapped_column(String(500), nullable=False)

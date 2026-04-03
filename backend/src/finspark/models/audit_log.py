@@ -28,7 +28,6 @@ class AuditLog(TimestampMixin, Base):
     tenant_id: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,
-        index=True,
         comment="Nullable for system-level events",
     )
     # Who performed the action
@@ -43,14 +42,12 @@ class AuditLog(TimestampMixin, Base):
     action: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
-        index=True,
         comment="e.g. configuration.created, simulation.started, adapter.deployed",
     )
     # What resource was affected
     resource_type: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
-        index=True,
         comment="ORM model name: Configuration, Simulation, AdapterVersion, etc.",
     )
     resource_id: Mapped[str | None] = mapped_column(

@@ -78,7 +78,6 @@ class AdapterVersion(TimestampMixin, Base):
         String(36),
         ForeignKey("finspark_adapters.id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
     semver: Mapped[str] = mapped_column(
         String(20),

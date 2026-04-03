@@ -30,13 +30,11 @@ class Simulation(TimestampMixin, Base):
     tenant_id: Mapped[str] = mapped_column(
         String(36),
         nullable=False,
-        index=True,
     )
     configuration_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("finspark_configurations.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     scenario: Mapped[str] = mapped_column(
         String(100),
@@ -121,7 +119,6 @@ class SimulationStep(TimestampMixin, Base):
         String(36),
         ForeignKey("finspark_simulations.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     step_name: Mapped[str] = mapped_column(String(255), nullable=False)
     step_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

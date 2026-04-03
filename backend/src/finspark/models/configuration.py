@@ -41,21 +41,18 @@ class Configuration(TimestampMixin, SoftDeleteMixin, Base):
     tenant_id: Mapped[str] = mapped_column(
         String(36),
         nullable=False,
-        index=True,
         comment="Owning tenant",
     )
     adapter_version_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("finspark_adapter_versions.id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         default="draft",
         comment="draft | validated | deployed | failed | archived",
-        index=True,
     )
     environment: Mapped[str] = mapped_column(
         String(20),
