@@ -9,14 +9,14 @@ DELETE /configurations/{config_id}           — archive config
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.api.deps import (
     CurrentUser,
@@ -26,6 +26,7 @@ from finspark.api.deps import (
     UserContext,
     require_roles,
 )
+from finspark.core.config import settings
 from finspark.schemas.common import MessageResponse
 from finspark.schemas.configurations import (
     ConfigCompareRequest,
@@ -38,16 +39,72 @@ from finspark.schemas.configurations import (
     ConfigStatus,
     ConfigTransitionRequest,
     ConfigValidateResponse,
-    DeployEnvironment,
 )
 from finspark.services.lifecycle import (
     InvalidTransitionError,
     InsufficientRoleError,
-    validate_rollback,
-    validate_transition,
 )
+from finspark.services.llm.client import GeminiAPIError, GeminiClient
+from finspark.services.llm.config_generator import generate_config
 
 logger = structlog.get_logger(__name__)
+
+_MAX_LLM_RETRIES = 3
+_RETRY_BASE_DELAY = 1.0  # seconds
+
+
+def _rule_based_generate(body: ConfigGenerateRequest) -> dict[str, Any]:
+    """Minimal rule-based config scaffold used as LLM fallback."""
+    return {
+        "base_url": "",
+        "endpoints": [],
+        "auth": {"type": "api_key", "config": {}},
+        "timeout_ms": 5000,
+        "retry_count": 3,
+        "retry_backoff": "exponential",
+        "field_mappings": [],
+        "headers": {},
+        "notes": (
+            f"Rule-based scaffold for adapter {body.adapter_id}. "
+            "Fill in endpoint details manually."
+        ),
+    }
+
+
+async def _llm_generate_with_retry(body: ConfigGenerateRequest) -> dict[str, Any]:
+    """Attempt LLM generation with exponential-backoff retry (up to _MAX_LLM_RETRIES)."""
+    client = GeminiClient()
+    adapter_info: dict[str, Any] = {
+        "name": str(body.adapter_id),
+        "adapter_id": str(body.adapter_id),
+    }
+    document_entities: list[dict[str, Any]] = [
+        {"document_id": str(doc_id)} for doc_id in body.document_ids
+    ]
+
+    last_exc: Exception = RuntimeError("LLM generation did not attempt")
+    for attempt in range(_MAX_LLM_RETRIES):
+        try:
+            result = await generate_config(
+                adapter_info=adapter_info,
+                document_entities=document_entities,
+                user_hint=body.llm_hint,
+                client=client,
+            )
+            return result
+        except (GeminiAPIError, Exception) as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < _MAX_LLM_RETRIES - 1:
+                delay = _RETRY_BASE_DELAY * (2**attempt)
+                logger.warning(
+                    "llm_generation_retry",
+                    attempt=attempt + 1,
+                    delay=delay,
+                    error=str(exc),
+                )
+                await asyncio.sleep(delay)
+
+    raise last_exc
 
 router = APIRouter(prefix="/configurations", tags=["Configurations"])
 
@@ -78,15 +135,46 @@ async def generate_configuration(
     db: DbDep,
     _user: CurrentUser,
 ) -> ConfigRecord:
-    # TODO: invoke LLM auto-config service
     now = datetime.utcnow()
+    payload: dict[str, Any] = {}
+    generation_method = "rule_based"
+
+    use_llm = settings.AI_ENABLED and bool(settings.GEMINI_API_KEY)
+
+    if use_llm:
+        try:
+            payload = await _llm_generate_with_retry(body)
+            generation_method = "llm"
+            logger.info(
+                "config_generated_via_llm",
+                adapter_id=str(body.adapter_id),
+                tenant_id=str(body.tenant_id),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "llm_generation_failed_using_fallback",
+                adapter_id=str(body.adapter_id),
+                error=str(exc),
+            )
+            payload = _rule_based_generate(body)
+    else:
+        payload = _rule_based_generate(body)
+        logger.info(
+            "config_generated_via_rule_based",
+            adapter_id=str(body.adapter_id),
+            tenant_id=str(body.tenant_id),
+            ai_enabled=settings.AI_ENABLED,
+        )
+
+    payload["_generation_method"] = generation_method
+
     return ConfigRecord(
         id=uuid.uuid4(),
         tenant_id=body.tenant_id,
         adapter_id=body.adapter_id,
         status=ConfigStatus.DRAFT,
         environment=None,
-        payload={},
+        payload=payload,
         version=1,
         created_at=now,
         updated_at=now,
