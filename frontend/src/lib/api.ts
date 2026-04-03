@@ -1,4 +1,3 @@
-import axios from "axios";
 import type {
   Adapter,
   AuditEntry,
@@ -7,6 +6,7 @@ import type {
   HealthStatus,
   Simulation,
 } from "@/types";
+import axios from "axios";
 
 const api = axios.create({
   baseURL: "",
@@ -23,7 +23,7 @@ api.interceptors.response.use(
       console.error("[API Error]", error.response?.status, error.message);
     }
     return Promise.reject(error);
-  },
+  }
 );
 
 export const healthApi = {
@@ -48,21 +48,15 @@ export const documentsApi = {
 };
 
 export const configurationsApi = {
-  list: () =>
-    api.get<Configuration[]>("/api/v1/configurations/").then((r) => r.data),
+  list: () => api.get<Configuration[]>("/api/v1/configurations/").then((r) => r.data),
   generate: (params: { name: string; adapter_type: string }) =>
-    api
-      .post<Configuration>("/api/v1/configurations/generate", params)
-      .then((r) => r.data),
+    api.post<Configuration>("/api/v1/configurations/generate", params).then((r) => r.data),
 };
 
 export const simulationsApi = {
-  list: () =>
-    api.get<Simulation[]>("/api/v1/simulations/").then((r) => r.data),
+  list: () => api.get<Simulation[]>("/api/v1/simulations/").then((r) => r.data),
   run: (params: { name: string; configuration_id: string }) =>
-    api
-      .post<Simulation>("/api/v1/simulations/run", params)
-      .then((r) => r.data),
+    api.post<Simulation>("/api/v1/simulations/run", params).then((r) => r.data),
 };
 
 export const auditApi = {
