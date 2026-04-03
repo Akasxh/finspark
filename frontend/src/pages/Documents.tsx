@@ -1,28 +1,21 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { documentsApi } from "@/lib/api";
 import type { Document } from "@/types";
-import { useDropzone } from "react-dropzone";
-import { useCallback, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import clsx from "clsx";
 import {
-  Upload,
-  FileText,
-  FileSpreadsheet,
-  FileCode,
+  AlertCircle,
   CheckCircle2,
   Clock,
-  AlertCircle,
+  FileCode,
+  FileSpreadsheet,
+  FileText,
   Loader2,
+  Upload,
   X,
 } from "lucide-react";
-import clsx from "clsx";
-
-const fallbackDocs: Document[] = [
-  { id: "1", filename: "trade_report_q1.xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", size: 245760, status: "completed", uploaded_at: "2026-03-27T08:00:00Z", processed_at: "2026-03-27T08:01:23Z" },
-  { id: "2", filename: "compliance_policy.pdf", content_type: "application/pdf", size: 1048576, status: "completed", uploaded_at: "2026-03-26T14:30:00Z", processed_at: "2026-03-26T14:32:00Z" },
-  { id: "3", filename: "swift_messages.xml", content_type: "application/xml", size: 32768, status: "processing", uploaded_at: "2026-03-27T10:15:00Z" },
-  { id: "4", filename: "market_data_feed.json", content_type: "application/json", size: 524288, status: "completed", uploaded_at: "2026-03-27T09:00:00Z", processed_at: "2026-03-27T09:00:45Z" },
-  { id: "5", filename: "risk_assessment.csv", content_type: "text/csv", size: 163840, status: "failed", uploaded_at: "2026-03-25T16:00:00Z" },
-];
+import { useCallback, useState } from "react";
+import { useDropzone } from "react-dropzone";
+import type { FileRejection } from "react-dropzone";
 
 const statusConfig = {
   pending: { label: "Pending", icon: Clock, cls: "badge-yellow" },
@@ -32,10 +25,8 @@ const statusConfig = {
 } as const;
 
 function fileIcon(contentType: string) {
-  if (contentType.includes("spreadsheet") || contentType.includes("csv"))
-    return FileSpreadsheet;
-  if (contentType.includes("xml") || contentType.includes("json"))
-    return FileCode;
+  if (contentType.includes("spreadsheet") || contentType.includes("csv")) return FileSpreadsheet;
+  if (contentType.includes("xml") || contentType.includes("json")) return FileCode;
   return FileText;
 }
 
@@ -57,8 +48,9 @@ function formatDate(dateStr: string): string {
 export default function Documents() {
   const queryClient = useQueryClient();
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const { data, error } = useQuery({
+  const { data, error, isLoading } = useQuery({
     queryKey: ["documents"],
     queryFn: documentsApi.list,
   });
@@ -68,10 +60,15 @@ export default function Documents() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Upload failed. Please try again.";
+      setUploadError(message);
+    },
   });
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
+      setUploadError(null);
       for (const file of acceptedFiles) {
         setUploadQueue((q) => [...q, file.name]);
         uploadMutation.mutate(file, {
@@ -81,11 +78,27 @@ export default function Documents() {
         });
       }
     },
-    [uploadMutation],
+    [uploadMutation]
   );
+
+  const onDropRejected = useCallback((rejectedFiles: FileRejection[]) => {
+    const messages = rejectedFiles.flatMap((r) =>
+      r.errors.map((e) =>
+        e.code === "file-too-large" ? `${r.file.name} exceeds the 50 MB size limit` : e.message
+      )
+    );
+    setUploadError(messages.join("; "));
+  }, []);
+
+  const isBackendDown = !!error;
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
+    noClick: isBackendDown,
+    noDrag: isBackendDown,
+    disabled: isBackendDown,
+    maxSize: 50 * 1024 * 1024,
     accept: {
       "application/pdf": [".pdf"],
       "application/json": [".json"],
@@ -95,20 +108,30 @@ export default function Documents() {
     },
   });
 
-  const documents = data ?? fallbackDocs;
+  const handleDelete = useCallback((doc: Document) => {
+    if (window.confirm(`Delete "${doc.filename}"? This action cannot be undone.`)) {
+      alert("Delete not yet implemented — backend endpoint pending.");
+    }
+  }, []);
+
+  const documents: Document[] = data ?? [];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">Documents</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Upload and manage integration documents
-        </p>
+        <p className="mt-1 text-sm text-gray-400">Upload and manage integration documents</p>
       </div>
 
       {error && (
         <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-400">
-          Backend unavailable. Showing sample data. Uploads disabled.
+          Backend unavailable. Uploads disabled.
+        </div>
+      )}
+
+      {uploadError && (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-400">
+          {uploadError}
         </div>
       )}
 
@@ -116,10 +139,12 @@ export default function Documents() {
       <div
         {...getRootProps()}
         className={clsx(
-          "card group cursor-pointer border-2 border-dashed p-10 text-center transition-all",
-          isDragActive
-            ? "border-indigo-500 bg-indigo-500/5"
-            : "border-gray-700 hover:border-gray-500",
+          "card border-2 border-dashed p-10 text-center transition-all",
+          isBackendDown
+            ? "cursor-not-allowed opacity-50 border-gray-700"
+            : isDragActive
+              ? "cursor-pointer border-indigo-500 bg-indigo-500/5"
+              : "group cursor-pointer border-gray-700 hover:border-gray-500"
         )}
       >
         <input {...getInputProps()} />
@@ -129,19 +154,21 @@ export default function Documents() {
               "rounded-full p-3 transition-colors",
               isDragActive
                 ? "bg-indigo-500/20 text-indigo-400"
-                : "bg-gray-800 text-gray-400 group-hover:text-gray-300",
+                : "bg-gray-800 text-gray-400 group-hover:text-gray-300"
             )}
           >
             <Upload className="h-6 w-6" />
           </div>
           <div>
             <p className="font-medium text-gray-300">
-              {isDragActive
-                ? "Drop files here..."
-                : "Drag & drop files, or click to browse"}
+              {isBackendDown
+                ? "Upload unavailable — backend offline"
+                : isDragActive
+                  ? "Drop files here..."
+                  : "Drag & drop files, or click to browse"}
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              PDF, JSON, XML, CSV, XLSX supported
+              PDF, JSON, XML, CSV, XLSX supported &middot; max 50 MB
             </p>
           </div>
         </div>
@@ -168,49 +195,82 @@ export default function Documents() {
         <div className="border-b border-gray-800 px-6 py-4">
           <h3 className="font-semibold text-white">
             Recent Documents{" "}
-            <span className="text-sm font-normal text-gray-500">
-              ({documents.length})
-            </span>
+            {!isLoading && (
+              <span className="text-sm font-normal text-gray-500">({documents.length})</span>
+            )}
           </h3>
         </div>
-        <div className="divide-y divide-gray-800/60">
-          {documents.map((doc) => {
-            const st = statusConfig[doc.status];
-            const IconFile = fileIcon(doc.content_type);
-            const StatusIcon = st.icon;
 
-            return (
+        {isLoading ? (
+          <div className="divide-y divide-gray-800/60">
+            {Array.from({ length: 4 }).map((_, i) => (
               <div
-                key={doc.id}
-                className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-gray-800/30"
+                // biome-ignore lint/suspicious/noArrayIndexKey: skeleton rows have no stable id
+                key={i}
+                className="flex items-center gap-4 px-6 py-4"
               >
-                <div className="rounded-lg bg-gray-800 p-2">
-                  <IconFile className="h-4 w-4 text-gray-400" />
+                <div className="h-8 w-8 animate-pulse rounded-lg bg-gray-800" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-48 animate-pulse rounded bg-gray-800" />
+                  <div className="h-3 w-32 animate-pulse rounded bg-gray-800" />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-gray-200">
-                    {doc.filename}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {formatSize(doc.size)} &middot; {formatDate(doc.uploaded_at)}
-                  </p>
-                </div>
-                <span className={st.cls}>
-                  <StatusIcon
-                    className={clsx(
-                      "mr-1 h-3 w-3",
-                      doc.status === "processing" && "animate-spin",
-                    )}
-                  />
-                  {st.label}
-                </span>
-                <button type="button" className="text-gray-600 hover:text-gray-400 transition-colors">
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="h-5 w-20 animate-pulse rounded-full bg-gray-800" />
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : documents.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+            <div className="rounded-full bg-gray-800 p-4">
+              <Upload className="h-6 w-6 text-gray-500" />
+            </div>
+            <p className="font-medium text-gray-400">No documents yet.</p>
+            <p className="text-sm text-gray-500">
+              Upload your first document using the drop zone above.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-800/60">
+            {documents.map((doc) => {
+              const st = statusConfig[doc.status];
+              const IconFile = fileIcon(doc.content_type);
+              const StatusIcon = st.icon;
+
+              return (
+                <div
+                  key={doc.id}
+                  className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-gray-800/30"
+                >
+                  <div className="rounded-lg bg-gray-800 p-2">
+                    <IconFile className="h-4 w-4 text-gray-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-gray-200">{doc.filename}</p>
+                    <p className="text-xs text-gray-500">
+                      {formatSize(doc.size)} &middot; {formatDate(doc.uploaded_at)}
+                    </p>
+                  </div>
+                  <span className={st.cls}>
+                    <StatusIcon
+                      className={clsx(
+                        "mr-1 h-3 w-3",
+                        doc.status === "processing" && "animate-spin"
+                      )}
+                    />
+                    {st.label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(doc)}
+                    className="text-gray-600 hover:text-gray-400 transition-colors"
+                    aria-label={`Delete ${doc.filename}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
