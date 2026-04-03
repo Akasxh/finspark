@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     EMBEDDING_DEVICE: str = "cpu"
 
+    # File uploads
+    UPLOAD_DIR: str = "/tmp/finspark_uploads"
+    MAX_UPLOAD_SIZE_MB: int = 50
+
     # Logging
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     LOG_FORMAT: Literal["json", "console"] = "json"
