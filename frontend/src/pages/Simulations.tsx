@@ -1,41 +1,20 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { simulationsApi, configurationsApi } from "@/lib/api";
-import type { Simulation, Configuration } from "@/types";
-import { useState } from "react";
+import { configurationsApi, simulationsApi } from "@/lib/api";
+import type { Configuration, Simulation } from "@/types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import clsx from "clsx";
 import {
-  FlaskConical,
-  Play,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Loader2,
-  BarChart3,
   AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  Clock,
+  FlaskConical,
+  Loader2,
+  Play,
+  XCircle,
   Zap,
 } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
-import clsx from "clsx";
-
-const fallbackSims: Simulation[] = [
-  { id: "1", name: "Q1 Trade Settlement Test", configuration_id: "1", status: "completed", created_at: "2026-03-27T09:00:00Z", completed_at: "2026-03-27T09:02:30Z", results: { success_rate: 99.2, total_records: 5000, processed_records: 4960, errors: 40, warnings: 12, duration_ms: 150000 } },
-  { id: "2", name: "Bloomberg Feed Stress Test", configuration_id: "2", status: "completed", created_at: "2026-03-26T14:00:00Z", completed_at: "2026-03-26T14:05:00Z", results: { success_rate: 97.8, total_records: 50000, processed_records: 48900, errors: 1100, warnings: 230, duration_ms: 300000 } },
-  { id: "3", name: "SWIFT MT103 Validation", configuration_id: "3", status: "running", created_at: "2026-03-27T10:30:00Z" },
-  { id: "4", name: "CRM Sync Dry Run", configuration_id: "5", status: "completed", created_at: "2026-03-25T08:00:00Z", completed_at: "2026-03-25T08:01:00Z", results: { success_rate: 100, total_records: 1200, processed_records: 1200, errors: 0, warnings: 3, duration_ms: 60000 } },
-  { id: "5", name: "FIX Order Routing Fail Test", configuration_id: "4", status: "failed", created_at: "2026-03-24T16:00:00Z", completed_at: "2026-03-24T16:00:30Z", results: { success_rate: 23.5, total_records: 200, processed_records: 47, errors: 153, warnings: 45, duration_ms: 30000 } },
-];
-
-const fallbackConfigs: Configuration[] = [
-  { id: "1", name: "SAP Trade Settlement", adapter_type: "erp", status: "active", created_at: "", updated_at: "", parameters: {} },
-  { id: "2", name: "Bloomberg Real-Time Feed", adapter_type: "market_data", status: "active", created_at: "", updated_at: "", parameters: {} },
-];
+import { useState } from "react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 const statusConfig = {
   pending: { label: "Pending", icon: Clock, cls: "badge-yellow" },
@@ -50,13 +29,38 @@ function formatDuration(ms: number): string {
   return `${(ms / 60000).toFixed(1)}m`;
 }
 
+function SkeletonRow() {
+  return (
+    <div className="card p-5 animate-pulse">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="rounded-lg bg-gray-800 p-2">
+            <div className="h-4 w-4 rounded bg-gray-700" />
+          </div>
+          <div className="space-y-2">
+            <div className="h-4 w-48 rounded bg-gray-700" />
+            <div className="h-3 w-32 rounded bg-gray-800" />
+          </div>
+        </div>
+        <div className="h-5 w-20 rounded-full bg-gray-800" />
+      </div>
+    </div>
+  );
+}
+
 export default function Simulations() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [simName, setSimName] = useState("");
   const [configId, setConfigId] = useState("");
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runSuccess, setRunSuccess] = useState(false);
 
-  const { data: simData, error: simError } = useQuery({
+  const {
+    data: simData,
+    isLoading: simsLoading,
+    error: simError,
+  } = useQuery({
     queryKey: ["simulations"],
     queryFn: simulationsApi.list,
   });
@@ -73,11 +77,17 @@ export default function Simulations() {
       setShowForm(false);
       setSimName("");
       setConfigId("");
+      setRunError(null);
+      setRunSuccess(true);
+      setTimeout(() => setRunSuccess(false), 4000);
+    },
+    onError: (err: Error) => {
+      setRunError(err.message ?? "Failed to start simulation.");
     },
   });
 
-  const simulations = simData ?? fallbackSims;
-  const configs = configData ?? fallbackConfigs;
+  const simulations: Simulation[] = simData ?? [];
+  const configs: Configuration[] = configData ?? [];
 
   const completedSims = simulations.filter((s) => s.results);
   const chartData = completedSims.map((s) => ({
@@ -91,14 +101,15 @@ export default function Simulations() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Simulations</h1>
-          <p className="mt-1 text-sm text-gray-400">
-            Run and monitor integration simulations
-          </p>
+          <p className="mt-1 text-sm text-gray-400">Run and monitor integration simulations</p>
         </div>
         <button
           type="button"
           className="btn-primary"
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            setShowForm(!showForm);
+            setRunError(null);
+          }}
         >
           {showForm ? (
             "Cancel"
@@ -112,7 +123,14 @@ export default function Simulations() {
 
       {simError && (
         <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-400">
-          Backend unavailable. Showing sample data.
+          Failed to load simulations. Check your connection and try again.
+        </div>
+      )}
+
+      {runSuccess && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Simulation started successfully.
         </div>
       )}
 
@@ -127,6 +145,7 @@ export default function Simulations() {
             onSubmit={(e) => {
               e.preventDefault();
               if (simName.trim() && configId) {
+                setRunError(null);
                 runMutation.mutate({
                   name: simName.trim(),
                   configuration_id: configId,
@@ -149,7 +168,10 @@ export default function Simulations() {
               />
             </div>
             <div>
-              <label htmlFor="sim-config" className="mb-1.5 block text-xs font-medium text-gray-400">
+              <label
+                htmlFor="sim-config"
+                className="mb-1.5 block text-xs font-medium text-gray-400"
+              >
                 Configuration
               </label>
               <select
@@ -177,6 +199,11 @@ export default function Simulations() {
               </button>
             </div>
           </form>
+          {runError && (
+            <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-400">
+              {runError}
+            </div>
+          )}
         </div>
       )}
 
@@ -210,85 +237,96 @@ export default function Simulations() {
 
       {/* Simulation list */}
       <div className="space-y-3">
-        {simulations.map((sim) => {
-          const st = statusConfig[sim.status];
-          const StatusIcon = st.icon;
+        {simsLoading ? (
+          <>
+            <SkeletonRow />
+            <SkeletonRow />
+            <SkeletonRow />
+          </>
+        ) : simulations.length === 0 && !simError ? (
+          <div className="card flex flex-col items-center justify-center py-16 text-center">
+            <FlaskConical className="mb-3 h-10 w-10 text-gray-600" />
+            <p className="text-sm font-medium text-gray-400">No simulations yet</p>
+            <p className="mt-1 text-xs text-gray-600">
+              Click "Run Simulation" to test an integration configuration.
+            </p>
+          </div>
+        ) : (
+          simulations.map((sim) => {
+            const st = statusConfig[sim.status];
+            const StatusIcon = st.icon;
 
-          return (
-            <div key={sim.id} className="card p-5">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-lg bg-gray-800 p-2">
-                    <FlaskConical className="h-4 w-4 text-gray-400" />
+            return (
+              <div key={sim.id} className="card p-5">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg bg-gray-800 p-2">
+                      <FlaskConical className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-white">{sim.name}</h3>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {new Date(sim.created_at).toLocaleString()}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-medium text-white">{sim.name}</h3>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      {new Date(sim.created_at).toLocaleString()}
-                    </p>
-                  </div>
+                  <span className={st.cls}>
+                    <StatusIcon
+                      className={clsx("mr-1 h-3 w-3", sim.status === "running" && "animate-spin")}
+                    />
+                    {st.label}
+                  </span>
                 </div>
-                <span className={st.cls}>
-                  <StatusIcon
-                    className={clsx(
-                      "mr-1 h-3 w-3",
-                      sim.status === "running" && "animate-spin",
-                    )}
-                  />
-                  {st.label}
-                </span>
+
+                {sim.results && (
+                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                    <div className="rounded-lg bg-gray-800/50 p-3">
+                      <p className="text-xs text-gray-500">Success Rate</p>
+                      <p
+                        className={clsx(
+                          "mt-1 text-lg font-bold",
+                          sim.results.success_rate >= 95
+                            ? "text-emerald-400"
+                            : sim.results.success_rate >= 80
+                              ? "text-amber-400"
+                              : "text-red-400"
+                        )}
+                      >
+                        {sim.results.success_rate}%
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-gray-800/50 p-3">
+                      <p className="text-xs text-gray-500">Records</p>
+                      <p className="mt-1 text-lg font-bold text-white">
+                        {sim.results.processed_records.toLocaleString()}
+                        <span className="text-xs font-normal text-gray-500">
+                          /{sim.results.total_records.toLocaleString()}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-gray-800/50 p-3">
+                      <p className="text-xs text-gray-500">Errors</p>
+                      <p className="mt-1 text-lg font-bold text-red-400">{sim.results.errors}</p>
+                    </div>
+                    <div className="rounded-lg bg-gray-800/50 p-3">
+                      <p className="text-xs text-gray-500">Warnings</p>
+                      <p className="mt-1 flex items-center gap-1 text-lg font-bold text-amber-400">
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                        {sim.results.warnings}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-gray-800/50 p-3">
+                      <p className="text-xs text-gray-500">Duration</p>
+                      <p className="mt-1 text-lg font-bold text-gray-300">
+                        {formatDuration(sim.results.duration_ms)}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
-
-              {sim.results && (
-                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-                  <div className="rounded-lg bg-gray-800/50 p-3">
-                    <p className="text-xs text-gray-500">Success Rate</p>
-                    <p
-                      className={clsx(
-                        "mt-1 text-lg font-bold",
-                        sim.results.success_rate >= 95
-                          ? "text-emerald-400"
-                          : sim.results.success_rate >= 80
-                            ? "text-amber-400"
-                            : "text-red-400",
-                      )}
-                    >
-                      {sim.results.success_rate}%
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-gray-800/50 p-3">
-                    <p className="text-xs text-gray-500">Records</p>
-                    <p className="mt-1 text-lg font-bold text-white">
-                      {sim.results.processed_records.toLocaleString()}
-                      <span className="text-xs font-normal text-gray-500">
-                        /{sim.results.total_records.toLocaleString()}
-                      </span>
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-gray-800/50 p-3">
-                    <p className="text-xs text-gray-500">Errors</p>
-                    <p className="mt-1 text-lg font-bold text-red-400">
-                      {sim.results.errors}
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-gray-800/50 p-3">
-                    <p className="text-xs text-gray-500">Warnings</p>
-                    <p className="mt-1 flex items-center gap-1 text-lg font-bold text-amber-400">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {sim.results.warnings}
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-gray-800/50 p-3">
-                    <p className="text-xs text-gray-500">Duration</p>
-                    <p className="mt-1 text-lg font-bold text-gray-300">
-                      {formatDuration(sim.results.duration_ms)}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
     </div>
   );
