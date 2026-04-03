@@ -1,15 +1,6 @@
 import { adaptersApi, configurationsApi, documentsApi, simulationsApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  FileText,
-  FlaskConical,
-  Plug,
-  Settings,
-  TrendingUp,
-} from "lucide-react";
+import { Activity, FileText, FlaskConical, Plug, Settings } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -55,11 +46,10 @@ interface MetricCardProps {
   value: string | number;
   subtitle: string;
   icon: React.ComponentType<{ className?: string }>;
-  trend?: string;
   color: string;
 }
 
-function MetricCard({ title, value, subtitle, icon: Icon, trend, color }: MetricCardProps) {
+function MetricCard({ title, value, subtitle, icon: Icon, color }: MetricCardProps) {
   return (
     <div className="card-hover p-6">
       <div className="flex items-start justify-between">
@@ -72,13 +62,30 @@ function MetricCard({ title, value, subtitle, icon: Icon, trend, color }: Metric
           <Icon className="h-5 w-5" />
         </div>
       </div>
-      {trend && (
-        <div className="mt-3 flex items-center gap-1 text-xs text-emerald-400">
-          <TrendingUp className="h-3 w-3" />
-          {trend}
-        </div>
-      )}
     </div>
+  );
+}
+
+function MetricCardSkeleton() {
+  return (
+    <div className="card-hover p-6 animate-pulse">
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <div className="h-4 w-28 rounded bg-gray-700" />
+          <div className="mt-3 h-8 w-16 rounded bg-gray-700" />
+          <div className="mt-2 h-3 w-36 rounded bg-gray-700" />
+        </div>
+        <div className="h-10 w-10 rounded-lg bg-gray-700" />
+      </div>
+    </div>
+  );
+}
+
+function SampleBadge() {
+  return (
+    <span className="inline-flex items-center rounded-md border border-gray-600/40 bg-gray-700/40 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+      Sample data
+    </span>
   );
 }
 
@@ -87,6 +94,10 @@ export default function Dashboard() {
   const documents = useQuery({ queryKey: ["documents"], queryFn: documentsApi.list });
   const configs = useQuery({ queryKey: ["configurations"], queryFn: configurationsApi.list });
   const sims = useQuery({ queryKey: ["simulations"], queryFn: simulationsApi.list });
+
+  const isLoading =
+    adapters.isLoading || documents.isLoading || configs.isLoading || sims.isLoading;
+  const hasError = adapters.error || documents.error || configs.error || sims.error;
 
   const adapterCount = adapters.data?.length ?? 0;
   const docCount = documents.data?.length ?? 0;
@@ -100,39 +111,53 @@ export default function Dashboard() {
         <p className="mt-1 text-sm text-gray-400">Integration platform overview and metrics</p>
       </div>
 
+      {hasError && (
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-400">
+          Backend unavailable. Showing sample data.
+        </div>
+      )}
+
       {/* Metric cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
-          title="Active Adapters"
-          value={adapterCount}
-          subtitle="Integration connectors"
-          icon={Plug}
-          trend="+2 this week"
-          color="bg-indigo-500/10 text-indigo-400"
-        />
-        <MetricCard
-          title="Documents"
-          value={docCount}
-          subtitle="Uploaded & processed"
-          icon={FileText}
-          trend="+18 today"
-          color="bg-emerald-500/10 text-emerald-400"
-        />
-        <MetricCard
-          title="Configurations"
-          value={configCount}
-          subtitle="Active configs"
-          icon={Settings}
-          color="bg-amber-500/10 text-amber-400"
-        />
-        <MetricCard
-          title="Simulations"
-          value={simCount}
-          subtitle="Total runs"
-          icon={FlaskConical}
-          trend="98.5% success rate"
-          color="bg-purple-500/10 text-purple-400"
-        />
+        {isLoading ? (
+          <>
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+          </>
+        ) : (
+          <>
+            <MetricCard
+              title="Active Adapters"
+              value={adapterCount}
+              subtitle="Integration connectors"
+              icon={Plug}
+              color="bg-indigo-500/10 text-indigo-400"
+            />
+            <MetricCard
+              title="Documents"
+              value={docCount}
+              subtitle="Uploaded & processed"
+              icon={FileText}
+              color="bg-emerald-500/10 text-emerald-400"
+            />
+            <MetricCard
+              title="Configurations"
+              value={configCount}
+              subtitle="Active configs"
+              icon={Settings}
+              color="bg-amber-500/10 text-amber-400"
+            />
+            <MetricCard
+              title="Simulations"
+              value={simCount}
+              subtitle="Total runs"
+              icon={FlaskConical}
+              color="bg-purple-500/10 text-purple-400"
+            />
+          </>
+        )}
       </div>
 
       {/* Charts row */}
@@ -141,7 +166,10 @@ export default function Dashboard() {
         <div className="card p-6 lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h3 className="font-semibold text-white">Weekly Activity</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-white">Weekly Activity</h3>
+                <SampleBadge />
+              </div>
               <p className="text-xs text-gray-400">Documents & simulations processed</p>
             </div>
             <Activity className="h-4 w-4 text-gray-500" />
@@ -170,7 +198,10 @@ export default function Dashboard() {
         {/* Status pie */}
         <div className="card p-6">
           <div className="mb-4">
-            <h3 className="font-semibold text-white">Adapter Status</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-white">Adapter Status</h3>
+              <SampleBadge />
+            </div>
             <p className="text-xs text-gray-400">Current distribution</p>
           </div>
           <div className="h-48">
@@ -218,18 +249,11 @@ export default function Dashboard() {
       <div className="card p-6">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-white">Data Throughput</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-white">Data Throughput</h3>
+              <SampleBadge />
+            </div>
             <p className="text-xs text-gray-400">Records processed per hour (today)</p>
-          </div>
-          <div className="flex items-center gap-4 text-xs">
-            <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-              <span className="text-gray-400">12.2k processed</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
-              <span className="text-gray-400">23 warnings</span>
-            </div>
           </div>
         </div>
         <div className="h-56">
