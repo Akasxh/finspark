@@ -1,48 +1,126 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { simulationsApi, configurationsApi } from "@/lib/api";
-import type { Simulation, Configuration } from "@/types";
-import { useState } from "react";
+import { configurationsApi, simulationsApi } from "@/lib/api";
+import type { Configuration, Simulation } from "@/types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import clsx from "clsx";
 import {
-  FlaskConical,
-  Play,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Loader2,
-  BarChart3,
   AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  Clock,
+  FlaskConical,
+  Loader2,
+  Play,
+  XCircle,
   Zap,
 } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
-import clsx from "clsx";
+import { useState } from "react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 const fallbackSims: Simulation[] = [
-  { id: "1", name: "Q1 Trade Settlement Test", configuration_id: "1", status: "completed", created_at: "2026-03-27T09:00:00Z", completed_at: "2026-03-27T09:02:30Z", results: { success_rate: 99.2, total_records: 5000, processed_records: 4960, errors: 40, warnings: 12, duration_ms: 150000 } },
-  { id: "2", name: "Bloomberg Feed Stress Test", configuration_id: "2", status: "completed", created_at: "2026-03-26T14:00:00Z", completed_at: "2026-03-26T14:05:00Z", results: { success_rate: 97.8, total_records: 50000, processed_records: 48900, errors: 1100, warnings: 230, duration_ms: 300000 } },
-  { id: "3", name: "SWIFT MT103 Validation", configuration_id: "3", status: "running", created_at: "2026-03-27T10:30:00Z" },
-  { id: "4", name: "CRM Sync Dry Run", configuration_id: "5", status: "completed", created_at: "2026-03-25T08:00:00Z", completed_at: "2026-03-25T08:01:00Z", results: { success_rate: 100, total_records: 1200, processed_records: 1200, errors: 0, warnings: 3, duration_ms: 60000 } },
-  { id: "5", name: "FIX Order Routing Fail Test", configuration_id: "4", status: "failed", created_at: "2026-03-24T16:00:00Z", completed_at: "2026-03-24T16:00:30Z", results: { success_rate: 23.5, total_records: 200, processed_records: 47, errors: 153, warnings: 45, duration_ms: 30000 } },
+  {
+    id: "1",
+    name: "Q1 Trade Settlement Test",
+    configuration_id: "1",
+    status: "completed",
+    created_at: "2026-03-27T09:00:00Z",
+    completed_at: "2026-03-27T09:02:30Z",
+    results: {
+      success_rate: 99.2,
+      total_records: 5000,
+      processed_records: 4960,
+      errors: 40,
+      warnings: 12,
+      duration_ms: 150000,
+    },
+  },
+  {
+    id: "2",
+    name: "Bloomberg Feed Stress Test",
+    configuration_id: "2",
+    status: "completed",
+    created_at: "2026-03-26T14:00:00Z",
+    completed_at: "2026-03-26T14:05:00Z",
+    results: {
+      success_rate: 97.8,
+      total_records: 50000,
+      processed_records: 48900,
+      errors: 1100,
+      warnings: 230,
+      duration_ms: 300000,
+    },
+  },
+  {
+    id: "3",
+    name: "SWIFT MT103 Validation",
+    configuration_id: "3",
+    status: "running",
+    created_at: "2026-03-27T10:30:00Z",
+  },
+  {
+    id: "4",
+    name: "CRM Sync Dry Run",
+    configuration_id: "5",
+    status: "completed",
+    created_at: "2026-03-25T08:00:00Z",
+    completed_at: "2026-03-25T08:01:00Z",
+    results: {
+      success_rate: 100,
+      total_records: 1200,
+      processed_records: 1200,
+      errors: 0,
+      warnings: 3,
+      duration_ms: 60000,
+    },
+  },
+  {
+    id: "5",
+    name: "FIX Order Routing Fail Test",
+    configuration_id: "4",
+    status: "failed",
+    created_at: "2026-03-24T16:00:00Z",
+    completed_at: "2026-03-24T16:00:30Z",
+    results: {
+      success_rate: 23.5,
+      total_records: 200,
+      processed_records: 47,
+      errors: 153,
+      warnings: 45,
+      duration_ms: 30000,
+    },
+  },
 ];
 
 const fallbackConfigs: Configuration[] = [
-  { id: "1", name: "SAP Trade Settlement", adapter_type: "erp", status: "active", created_at: "", updated_at: "", parameters: {} },
-  { id: "2", name: "Bloomberg Real-Time Feed", adapter_type: "market_data", status: "active", created_at: "", updated_at: "", parameters: {} },
+  {
+    id: "1",
+    name: "SAP Trade Settlement",
+    adapter_type: "erp",
+    status: "active",
+    created_at: "",
+    updated_at: "",
+    parameters: {},
+  },
+  {
+    id: "2",
+    name: "Bloomberg Real-Time Feed",
+    adapter_type: "market_data",
+    status: "active",
+    created_at: "",
+    updated_at: "",
+    parameters: {},
+  },
 ];
 
-const statusConfig = {
+const statusConfig: Record<string, { label: string; icon: typeof Clock; cls: string }> = {
   pending: { label: "Pending", icon: Clock, cls: "badge-yellow" },
+  queued: { label: "Queued", icon: Clock, cls: "badge-yellow" },
   running: { label: "Running", icon: Loader2, cls: "badge-blue" },
   completed: { label: "Completed", icon: CheckCircle2, cls: "badge-green" },
+  passed: { label: "Passed", icon: CheckCircle2, cls: "badge-green" },
   failed: { label: "Failed", icon: XCircle, cls: "badge-red" },
-} as const;
+  cancelled: { label: "Cancelled", icon: XCircle, cls: "badge-gray" },
+  timed_out: { label: "Timed Out", icon: AlertTriangle, cls: "badge-red" },
+};
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -80,26 +158,23 @@ export default function Simulations() {
   const configs = configData ?? fallbackConfigs;
 
   const completedSims = simulations.filter((s) => s.results);
-  const chartData = completedSims.map((s) => ({
-    name: s.name.length > 20 ? `${s.name.slice(0, 20)}...` : s.name,
-    success: s.results?.success_rate ?? 0,
-    errors: s.results?.errors ?? 0,
-  }));
+  const chartData = completedSims.map((s) => {
+    const label = s.name ?? s.scenario ?? "Simulation";
+    return {
+      name: label.length > 20 ? `${label.slice(0, 20)}...` : label,
+      success: s.results?.success_rate ?? 0,
+      errors: s.results?.errors ?? 0,
+    };
+  });
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Simulations</h1>
-          <p className="mt-1 text-sm text-gray-400">
-            Run and monitor integration simulations
-          </p>
+          <p className="mt-1 text-sm text-gray-400">Run and monitor integration simulations</p>
         </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => setShowForm(!showForm)}
-        >
+        <button type="button" className="btn-primary" onClick={() => setShowForm(!showForm)}>
           {showForm ? (
             "Cancel"
           ) : (
@@ -149,7 +224,10 @@ export default function Simulations() {
               />
             </div>
             <div>
-              <label htmlFor="sim-config" className="mb-1.5 block text-xs font-medium text-gray-400">
+              <label
+                htmlFor="sim-config"
+                className="mb-1.5 block text-xs font-medium text-gray-400"
+              >
                 Configuration
               </label>
               <select
@@ -211,7 +289,7 @@ export default function Simulations() {
       {/* Simulation list */}
       <div className="space-y-3">
         {simulations.map((sim) => {
-          const st = statusConfig[sim.status];
+          const st = statusConfig[sim.status] ?? statusConfig.pending;
           const StatusIcon = st.icon;
 
           return (
@@ -222,18 +300,17 @@ export default function Simulations() {
                     <FlaskConical className="h-4 w-4 text-gray-400" />
                   </div>
                   <div>
-                    <h3 className="font-medium text-white">{sim.name}</h3>
+                    <h3 className="font-medium text-white">
+                      {sim.name ?? sim.scenario ?? "Simulation"}
+                    </h3>
                     <p className="mt-0.5 text-xs text-gray-500">
-                      {new Date(sim.created_at).toLocaleString()}
+                      {new Date(sim.created_at ?? sim.queued_at ?? "").toLocaleString()}
                     </p>
                   </div>
                 </div>
                 <span className={st.cls}>
                   <StatusIcon
-                    className={clsx(
-                      "mr-1 h-3 w-3",
-                      sim.status === "running" && "animate-spin",
-                    )}
+                    className={clsx("mr-1 h-3 w-3", sim.status === "running" && "animate-spin")}
                   />
                   {st.label}
                 </span>
@@ -250,7 +327,7 @@ export default function Simulations() {
                           ? "text-emerald-400"
                           : sim.results.success_rate >= 80
                             ? "text-amber-400"
-                            : "text-red-400",
+                            : "text-red-400"
                       )}
                     >
                       {sim.results.success_rate}%
@@ -267,9 +344,7 @@ export default function Simulations() {
                   </div>
                   <div className="rounded-lg bg-gray-800/50 p-3">
                     <p className="text-xs text-gray-500">Errors</p>
-                    <p className="mt-1 text-lg font-bold text-red-400">
-                      {sim.results.errors}
-                    </p>
+                    <p className="mt-1 text-lg font-bold text-red-400">{sim.results.errors}</p>
                   </div>
                   <div className="rounded-lg bg-gray-800/50 p-3">
                     <p className="text-xs text-gray-500">Warnings</p>

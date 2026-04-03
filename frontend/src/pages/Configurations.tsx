@@ -1,33 +1,68 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { configurationsApi } from "@/lib/api";
 import type { Configuration } from "@/types";
-import { useState } from "react";
-import {
-  Settings,
-  Plus,
-  Clock,
-  ChevronDown,
-  Sparkles,
-  Copy,
-  Archive,
-} from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
+import { Archive, ChevronDown, Clock, Copy, Plus, Settings, Sparkles } from "lucide-react";
+import { useState } from "react";
 
 const fallbackConfigs: Configuration[] = [
-  { id: "1", name: "SAP Trade Settlement", adapter_type: "erp", status: "active", created_at: "2026-03-20T10:00:00Z", updated_at: "2026-03-27T08:00:00Z", parameters: { endpoint: "sap.prod.internal", batch_size: 500 } },
-  { id: "2", name: "Bloomberg Real-Time Feed", adapter_type: "market_data", status: "active", created_at: "2026-03-18T14:00:00Z", updated_at: "2026-03-26T16:00:00Z", parameters: { topics: ["FX", "RATES"], throttle_ms: 100 } },
-  { id: "3", name: "SWIFT MT103 Payments", adapter_type: "payments", status: "draft", created_at: "2026-03-25T09:00:00Z", updated_at: "2026-03-25T09:00:00Z", parameters: { message_type: "MT103", validation: "strict" } },
-  { id: "4", name: "FIX 4.4 Order Routing", adapter_type: "trading", status: "archived", created_at: "2026-02-10T11:00:00Z", updated_at: "2026-03-01T10:00:00Z", parameters: { fix_version: "4.4", heartbeat_interval: 30 } },
-  { id: "5", name: "Salesforce Contact Sync", adapter_type: "crm", status: "active", created_at: "2026-03-22T08:00:00Z", updated_at: "2026-03-27T06:00:00Z", parameters: { sync_interval: "15m", objects: ["Contact", "Account"] } },
+  {
+    id: "1",
+    name: "SAP Trade Settlement",
+    adapter_type: "erp",
+    status: "active",
+    created_at: "2026-03-20T10:00:00Z",
+    updated_at: "2026-03-27T08:00:00Z",
+    parameters: { endpoint: "sap.prod.internal", batch_size: 500 },
+  },
+  {
+    id: "2",
+    name: "Bloomberg Real-Time Feed",
+    adapter_type: "market_data",
+    status: "active",
+    created_at: "2026-03-18T14:00:00Z",
+    updated_at: "2026-03-26T16:00:00Z",
+    parameters: { topics: ["FX", "RATES"], throttle_ms: 100 },
+  },
+  {
+    id: "3",
+    name: "SWIFT MT103 Payments",
+    adapter_type: "payments",
+    status: "draft",
+    created_at: "2026-03-25T09:00:00Z",
+    updated_at: "2026-03-25T09:00:00Z",
+    parameters: { message_type: "MT103", validation: "strict" },
+  },
+  {
+    id: "4",
+    name: "FIX 4.4 Order Routing",
+    adapter_type: "trading",
+    status: "archived",
+    created_at: "2026-02-10T11:00:00Z",
+    updated_at: "2026-03-01T10:00:00Z",
+    parameters: { fix_version: "4.4", heartbeat_interval: 30 },
+  },
+  {
+    id: "5",
+    name: "Salesforce Contact Sync",
+    adapter_type: "crm",
+    status: "active",
+    created_at: "2026-03-22T08:00:00Z",
+    updated_at: "2026-03-27T06:00:00Z",
+    parameters: { sync_interval: "15m", objects: ["Contact", "Account"] },
+  },
 ];
 
 const adapterTypes = ["erp", "crm", "market_data", "payments", "trading"];
 
-const statusConfig = {
+const statusConfig: Record<string, { label: string; cls: string }> = {
   draft: { label: "Draft", cls: "badge-yellow" },
   active: { label: "Active", cls: "badge-green" },
   archived: { label: "Archived", cls: "badge-gray" },
-} as const;
+  validated: { label: "Validated", cls: "badge-blue" },
+  deployed: { label: "Deployed", cls: "badge-green" },
+  failed: { label: "Failed", cls: "badge-red" },
+};
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", {
@@ -69,11 +104,7 @@ export default function Configurations() {
             Manage and generate integration configurations
           </p>
         </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => setShowForm(!showForm)}
-        >
+        <button type="button" className="btn-primary" onClick={() => setShowForm(!showForm)}>
           {showForm ? (
             "Cancel"
           ) : (
@@ -173,7 +204,7 @@ export default function Configurations() {
                   </div>
                   <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
                     <span className="uppercase tracking-wide">
-                      {cfg.adapter_type.replace("_", " ")}
+                      {(cfg.adapter_type ?? "").replace("_", " ")}
                     </span>
                     <span>&middot;</span>
                     <span className="flex items-center gap-1">
@@ -185,7 +216,7 @@ export default function Configurations() {
                 <ChevronDown
                   className={clsx(
                     "h-4 w-4 text-gray-500 transition-transform",
-                    isExpanded && "rotate-180",
+                    isExpanded && "rotate-180"
                   )}
                 />
               </button>

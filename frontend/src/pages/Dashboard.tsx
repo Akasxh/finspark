@@ -1,29 +1,29 @@
+import { adaptersApi, configurationsApi, documentsApi, simulationsApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Plug,
-  FileText,
-  Settings,
-  FlaskConical,
-  TrendingUp,
   Activity,
-  CheckCircle2,
   AlertTriangle,
+  CheckCircle2,
+  FileText,
+  FlaskConical,
+  Plug,
+  Settings,
+  TrendingUp,
 } from "lucide-react";
 import {
-  AreaChart,
   Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts";
-import { adaptersApi, documentsApi, configurationsApi, simulationsApi } from "@/lib/api";
 
 const activityData = [
   { name: "Mon", documents: 12, simulations: 4 },
@@ -97,9 +97,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Integration platform overview and metrics
-        </p>
+        <p className="mt-1 text-sm text-gray-400">Integration platform overview and metrics</p>
       </div>
 
       {/* Metric cards */}
@@ -206,10 +204,7 @@ export default function Dashboard() {
             {statusData.map((s) => (
               <div key={s.name} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
-                  <div
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: s.color }}
-                  />
+                  <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
                   <span className="text-gray-400">{s.name}</span>
                 </div>
                 <span className="font-medium text-gray-300">{s.value}</span>

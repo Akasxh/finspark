@@ -1,31 +1,121 @@
-import { useQuery } from "@tanstack/react-query";
 import { auditApi } from "@/lib/api";
 import type { AuditEntry } from "@/types";
-import {
-  Shield,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
-  Upload,
-  Settings,
-  Play,
-  RefreshCw,
-  Plug,
-  User,
-} from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Play,
+  Plug,
+  RefreshCw,
+  Settings,
+  Shield,
+  Upload,
+  User,
+  XCircle,
+} from "lucide-react";
 
 const fallbackAudit: AuditEntry[] = [
-  { id: "1", action: "document.upload", entity_type: "document", entity_id: "doc-001", user: "akash@finspark.io", timestamp: "2026-03-27T10:30:00Z", status: "success", details: { filename: "trade_report_q1.xlsx" } },
-  { id: "2", action: "simulation.run", entity_type: "simulation", entity_id: "sim-001", user: "akash@finspark.io", timestamp: "2026-03-27T10:25:00Z", status: "success", details: { name: "Q1 Trade Settlement Test", duration_ms: 150000 } },
-  { id: "3", action: "configuration.generate", entity_type: "configuration", entity_id: "cfg-003", user: "sarah@finspark.io", timestamp: "2026-03-27T10:15:00Z", status: "success", details: { name: "SWIFT MT103 Payments" } },
-  { id: "4", action: "adapter.sync", entity_type: "adapter", entity_id: "adp-006", user: "system", timestamp: "2026-03-27T10:10:00Z", status: "failure", details: { adapter: "Reuters Eikon", error: "Connection timeout after 30s" } },
-  { id: "5", action: "simulation.run", entity_type: "simulation", entity_id: "sim-005", user: "david@finspark.io", timestamp: "2026-03-27T09:45:00Z", status: "warning", details: { name: "FIX Order Routing Fail Test", success_rate: 23.5 } },
-  { id: "6", action: "configuration.update", entity_type: "configuration", entity_id: "cfg-001", user: "akash@finspark.io", timestamp: "2026-03-27T09:30:00Z", status: "success", details: { field: "batch_size", old: 250, new: 500 } },
-  { id: "7", action: "adapter.activate", entity_type: "adapter", entity_id: "adp-008", user: "sarah@finspark.io", timestamp: "2026-03-27T09:00:00Z", status: "success", details: { adapter: "Murex MX.3" } },
-  { id: "8", action: "document.process", entity_type: "document", entity_id: "doc-003", user: "system", timestamp: "2026-03-27T08:45:00Z", status: "success", details: { filename: "swift_messages.xml", records_extracted: 342 } },
-  { id: "9", action: "adapter.sync", entity_type: "adapter", entity_id: "adp-001", user: "system", timestamp: "2026-03-27T08:30:00Z", status: "success", details: { adapter: "SAP ERP", records_synced: 1250 } },
-  { id: "10", action: "document.upload", entity_type: "document", entity_id: "doc-005", user: "david@finspark.io", timestamp: "2026-03-25T16:00:00Z", status: "failure", details: { filename: "risk_assessment.csv", error: "Invalid CSV structure" } },
+  {
+    id: "1",
+    action: "document.upload",
+    entity_type: "document",
+    entity_id: "doc-001",
+    user: "akash@finspark.io",
+    timestamp: "2026-03-27T10:30:00Z",
+    status: "success",
+    details: { filename: "trade_report_q1.xlsx" },
+  },
+  {
+    id: "2",
+    action: "simulation.run",
+    entity_type: "simulation",
+    entity_id: "sim-001",
+    user: "akash@finspark.io",
+    timestamp: "2026-03-27T10:25:00Z",
+    status: "success",
+    details: { name: "Q1 Trade Settlement Test", duration_ms: 150000 },
+  },
+  {
+    id: "3",
+    action: "configuration.generate",
+    entity_type: "configuration",
+    entity_id: "cfg-003",
+    user: "sarah@finspark.io",
+    timestamp: "2026-03-27T10:15:00Z",
+    status: "success",
+    details: { name: "SWIFT MT103 Payments" },
+  },
+  {
+    id: "4",
+    action: "adapter.sync",
+    entity_type: "adapter",
+    entity_id: "adp-006",
+    user: "system",
+    timestamp: "2026-03-27T10:10:00Z",
+    status: "failure",
+    details: { adapter: "Reuters Eikon", error: "Connection timeout after 30s" },
+  },
+  {
+    id: "5",
+    action: "simulation.run",
+    entity_type: "simulation",
+    entity_id: "sim-005",
+    user: "david@finspark.io",
+    timestamp: "2026-03-27T09:45:00Z",
+    status: "warning",
+    details: { name: "FIX Order Routing Fail Test", success_rate: 23.5 },
+  },
+  {
+    id: "6",
+    action: "configuration.update",
+    entity_type: "configuration",
+    entity_id: "cfg-001",
+    user: "akash@finspark.io",
+    timestamp: "2026-03-27T09:30:00Z",
+    status: "success",
+    details: { field: "batch_size", old: 250, new: 500 },
+  },
+  {
+    id: "7",
+    action: "adapter.activate",
+    entity_type: "adapter",
+    entity_id: "adp-008",
+    user: "sarah@finspark.io",
+    timestamp: "2026-03-27T09:00:00Z",
+    status: "success",
+    details: { adapter: "Murex MX.3" },
+  },
+  {
+    id: "8",
+    action: "document.process",
+    entity_type: "document",
+    entity_id: "doc-003",
+    user: "system",
+    timestamp: "2026-03-27T08:45:00Z",
+    status: "success",
+    details: { filename: "swift_messages.xml", records_extracted: 342 },
+  },
+  {
+    id: "9",
+    action: "adapter.sync",
+    entity_type: "adapter",
+    entity_id: "adp-001",
+    user: "system",
+    timestamp: "2026-03-27T08:30:00Z",
+    status: "success",
+    details: { adapter: "SAP ERP", records_synced: 1250 },
+  },
+  {
+    id: "10",
+    action: "document.upload",
+    entity_type: "document",
+    entity_id: "doc-005",
+    user: "david@finspark.io",
+    timestamp: "2026-03-25T16:00:00Z",
+    status: "failure",
+    details: { filename: "risk_assessment.csv", error: "Invalid CSV structure" },
+  },
 ];
 
 const actionIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -69,15 +159,20 @@ export default function Audit() {
     queryFn: auditApi.list,
   });
 
-  const entries = data ?? fallbackAudit;
+  const entries = (data ?? fallbackAudit).map((e) => ({
+    ...e,
+    status: e.status ?? e.outcome ?? ("success" as const),
+    timestamp: e.timestamp ?? e.created_at ?? new Date().toISOString(),
+    entity_type: e.entity_type ?? e.resource_type ?? "",
+    entity_id: e.entity_id ?? e.resource_id ?? "",
+    user: e.user ?? e.actor ?? e.actor_email ?? "system",
+  }));
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">Audit Log</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Activity timeline and compliance tracking
-        </p>
+        <p className="mt-1 text-sm text-gray-400">Activity timeline and compliance tracking</p>
       </div>
 
       {error && (
@@ -121,24 +216,24 @@ export default function Audit() {
           <div className="absolute left-[39px] top-0 bottom-0 w-px bg-gray-800" />
 
           {entries.map((entry, i) => {
-            const st = statusConfig[entry.status];
+            const stKey = entry.status as keyof typeof statusConfig;
+            const st = statusConfig[stKey] ?? statusConfig.success;
             const StatusIcon = st.icon;
-            const ActionIcon =
-              actionIcons[entry.action] ?? Shield;
+            const ActionIcon = actionIcons[entry.action] ?? Shield;
 
             return (
               <div
                 key={entry.id}
                 className={clsx(
                   "relative flex gap-4 px-6 py-4 transition-colors hover:bg-gray-800/20",
-                  i !== entries.length - 1 && "border-b border-gray-800/40",
+                  i !== entries.length - 1 && "border-b border-gray-800/40"
                 )}
               >
                 {/* Timeline dot */}
                 <div
                   className={clsx(
                     "relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                    st.bg,
+                    st.bg
                   )}
                 >
                   <ActionIcon className={clsx("h-3.5 w-3.5", st.cls)} />
@@ -158,7 +253,9 @@ export default function Audit() {
                         <User className="h-3 w-3" />
                         <span>{entry.user}</span>
                         <span>&middot;</span>
-                        <span>{entry.entity_type}/{entry.entity_id}</span>
+                        <span>
+                          {entry.entity_type}/{entry.entity_id}
+                        </span>
                       </div>
                     </div>
                     <span className="shrink-0 text-xs text-gray-500">
