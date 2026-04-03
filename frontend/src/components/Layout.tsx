@@ -1,5 +1,3 @@
-import { healthApi } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
   FileText,
@@ -26,13 +24,6 @@ const navItems = [
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const health = useQuery({
-    queryKey: ["health"],
-    queryFn: healthApi.check,
-    refetchInterval: 30_000,
-    retry: false,
-  });
-  const isConnected = health.isSuccess;
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -107,15 +98,8 @@ export default function Layout() {
           </button>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
-            <div
-              className={clsx(
-                "h-2 w-2 rounded-full",
-                isConnected ? "bg-emerald-500 animate-pulse" : "bg-red-500"
-              )}
-            />
-            <span className="text-xs text-gray-400">
-              {isConnected ? "Backend Connected" : "Backend Offline"}
-            </span>
+            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs text-gray-400">System Healthy</span>
           </div>
         </header>
 

@@ -1,5 +1,6 @@
-import ErrorBoundary from "@/components/ErrorBoundary";
 import Layout from "@/components/Layout";
+import NotFound from "@/components/NotFound";
+import { ToastProvider } from "@/components/Toast";
 import Adapters from "@/pages/Adapters";
 import Audit from "@/pages/Audit";
 import Configurations from "@/pages/Configurations";
@@ -21,8 +22,8 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
         <BrowserRouter>
           <Routes>
             <Route element={<Layout />}>
@@ -33,9 +34,10 @@ export default function App() {
               <Route path="/simulations" element={<Simulations />} />
               <Route path="/audit" element={<Audit />} />
             </Route>
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
-      </QueryClientProvider>
-    </ErrorBoundary>
+      </ToastProvider>
+    </QueryClientProvider>
   );
 }

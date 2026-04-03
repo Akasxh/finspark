@@ -31,66 +31,36 @@ export const healthApi = {
 };
 
 export const adaptersApi = {
-  list: () =>
-    api
-      .get<{ data: { adapters: Adapter[]; total: number; categories: string[] } }>(
-        "/api/v1/adapters/"
-      )
-      .then((r) => r.data.data.adapters),
+  list: () => api.get<Adapter[]>("/api/v1/adapters/").then((r) => r.data),
 };
 
 export const documentsApi = {
-  list: () => api.get("/api/v1/documents/").then((r) => (r.data.data ?? []) as Document[]),
+  list: () => api.get<Document[]>("/api/v1/documents/").then((r) => r.data),
   upload: (file: File) => {
-    const docType = "brd";
     const form = new FormData();
     form.append("file", file);
     return api
-      .post(`/api/v1/documents/upload?doc_type=${docType}`, form, {
+      .post<Document>("/api/v1/documents/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       })
-      .then((r) => r.data.data as Document);
+      .then((r) => r.data);
   },
 };
 
 export const configurationsApi = {
-  list: () =>
-    api.get("/api/v1/configurations/").then((r) => (r.data.data ?? []) as Configuration[]),
+  list: () => api.get<Configuration[]>("/api/v1/configurations/").then((r) => r.data),
   generate: (params: { name: string; adapter_type: string }) =>
-    api
-      .post("/api/v1/configurations/generate", {
-        name: params.name,
-        document_id: "",
-        adapter_version_id: "",
-      })
-      .then((r) => r.data.data as Configuration),
+    api.post<Configuration>("/api/v1/configurations/generate", params).then((r) => r.data),
 };
 
 export const simulationsApi = {
-  list: () =>
-    api.get("/api/v1/simulations/").then((r) => {
-      const data = r.data.data;
-      if (Array.isArray(data)) return data as Simulation[];
-      if (data?.items) return data.items as Simulation[];
-      return [] as Simulation[];
-    }),
+  list: () => api.get<Simulation[]>("/api/v1/simulations/").then((r) => r.data),
   run: (params: { name: string; configuration_id: string }) =>
-    api
-      .post("/api/v1/simulations/run", {
-        configuration_id: params.configuration_id,
-        test_type: "smoke",
-      })
-      .then((r) => r.data.data as Simulation),
+    api.post<Simulation>("/api/v1/simulations/run", params).then((r) => r.data),
 };
 
 export const auditApi = {
-  list: () =>
-    api.get("/api/v1/audit/").then((r) => {
-      const data = r.data.data;
-      if (Array.isArray(data)) return data as AuditEntry[];
-      if (data?.items) return data.items as AuditEntry[];
-      return [] as AuditEntry[];
-    }),
+  list: () => api.get<AuditEntry[]>("/api/v1/audit/").then((r) => r.data),
 };
 
 export default api;
