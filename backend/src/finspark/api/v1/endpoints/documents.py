@@ -7,7 +7,10 @@ GET    /documents/{document_id}/raw  — stream original file bytes
 """
 from __future__ import annotations
 
+import asyncio
+import datetime
 import uuid
+from pathlib import Path, PurePosixPath
 from typing import Annotated
 from uuid import UUID
 
@@ -24,6 +27,7 @@ from finspark.api.deps import (
     UserContext,
     require_roles,
 )
+from finspark.core.config import settings
 from finspark.schemas.common import MessageResponse, PaginatedResponse
 from finspark.schemas.documents import (
     DocumentDetail,
@@ -35,6 +39,17 @@ from finspark.schemas.documents import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+_ALLOWED_EXTENSIONS = {".docx", ".pdf", ".json", ".yaml", ".yml"}
+_SUPPORTED_CONTENT_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/pdf",
+    "application/json",
+    "application/x-yaml",
+    "text/yaml",
+    "text/x-yaml",
+}
+_CHUNK_SIZE = 64 * 1024  # 64 KB read chunks
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +72,7 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
         202: {"description": "Upload accepted, parsing queued."},
         400: {"description": "Unsupported file type or corrupt file."},
         403: {"description": "Tenant access denied."},
-        413: {"description": "File exceeds the 50 MB limit."},
+        413: {"description": "File exceeds the configured size limit."},  # 413 Content Too Large
     },
 )
 async def upload_document(
@@ -67,55 +82,80 @@ async def upload_document(
     description: Annotated[str, Form()] = "",
     tags: Annotated[str, Form(description="Comma-separated tag list")] = "",
 ) -> DocumentRecord:
-    _MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
-    content = await file.read()
-    if len(content) > _MAX_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File exceeds the 50 MB limit.",
-        )
-
-    _SUPPORTED_TYPES = {
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/pdf",
-        "application/json",
-        "application/x-yaml",
-        "text/yaml",
-        "text/x-yaml",
-    }
-    ct = file.content_type or ""
-    if ct not in _SUPPORTED_TYPES and not (file.filename or "").endswith(
-        (".docx", ".pdf", ".json", ".yaml", ".yml")
-    ):
+    # Validate extension BEFORE reading file content
+    raw_name = file.filename or ""
+    safe_name = PurePosixPath(raw_name).name  # strip any directory components
+    if not safe_name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported content type: {ct}.",
+            detail="Filename is required.",
+        )
+    suffix = Path(safe_name).suffix.lower()
+    ct = file.content_type or ""
+    if suffix not in _ALLOWED_EXTENSIONS and ct not in _SUPPORTED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: extension='{suffix}' content_type='{ct}'.",
         )
 
+    # Read in chunks to enforce size limit without loading the entire file first
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"File exceeds the {settings.MAX_UPLOAD_SIZE_MB} MB limit.",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
+
+    # Build a safe on-disk filename: uuid4 prefix prevents collisions and path guessing
     doc_id = uuid.uuid4()
+    stored_name = f"{doc_id}{suffix}"
+
+    upload_dir = Path(settings.UPLOAD_DIR).resolve()
+    dest_path = (upload_dir / stored_name).resolve()
+
+    # Guard: ensure resolved destination is strictly inside upload_dir
+    if not dest_path.is_relative_to(upload_dir):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid filename.",
+        )
+
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
 
     logger.info(
         "document_upload_accepted",
         doc_id=str(doc_id),
         tenant=str(tenant_ctx.tenant_id),
-        filename=file.filename,
-        size=len(content),
+        original_filename=raw_name,
+        stored_name=stored_name,
+        size=total,
     )
 
     # TODO: persist to object storage + enqueue background parse task
+    # When parse is invoked, use run_in_executor so it doesn't block the event loop:
+    #   loop = asyncio.get_event_loop()
+    #   parsed = await loop.run_in_executor(None, parse_document_bytes, content, safe_name)
     # (service layer not yet implemented — returns stub record)
     return DocumentRecord(
         id=doc_id,
         tenant_id=tenant_ctx.tenant_id,
-        filename=file.filename or "unknown",
+        filename=safe_name,
         content_type=ct,
-        size_bytes=len(content),
+        size_bytes=total,
         status=ParseStatus.PENDING,
         tags=tag_list,
         description=description,
-        uploaded_at=__import__("datetime").datetime.utcnow(),
+        uploaded_at=datetime.datetime.now(datetime.UTC),
         parsed_at=None,
         parse_errors=[],
     )
