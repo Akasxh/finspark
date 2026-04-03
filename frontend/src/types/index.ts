@@ -1,16 +1,25 @@
-export interface Adapter {
-  id: string;
-  name: string;
-  type?: string;
-  category?: string;
-  description?: string;
-  status?: "active" | "inactive" | "error";
-  is_active?: boolean;
-  version?: string;
-  versions?: AdapterVersion[];
-  icon?: string;
-  last_sync?: string;
-  created_at?: string;
+// APIResponse is the standard backend wrapper for all endpoints
+export interface APIResponse<T> {
+  success: boolean;
+  data: T | null;
+  message: string;
+  errors: string[];
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_next: boolean;
+}
+
+export interface AdapterEndpoint {
+  path: string;
+  method: string;
+  description: string;
+  request_fields: Record<string, unknown>[];
+  response_fields: Record<string, unknown>[];
 }
 
 export interface AdapterVersion {
@@ -19,56 +28,105 @@ export interface AdapterVersion {
   status: string;
   auth_type: string;
   base_url?: string;
-  endpoints?: { path: string; method: string; description?: string }[];
+  endpoints: AdapterEndpoint[];
   changelog?: string;
 }
 
+// Matches AdapterResponse Pydantic schema
+export interface Adapter {
+  id: string;
+  name: string;
+  category: string;
+  description?: string;
+  is_active: boolean;
+  icon?: string;
+  versions: AdapterVersion[];
+  created_at: string;
+  // legacy optional fields kept for backward compat
+  type?: string;
+  status?: "active" | "inactive" | "error";
+  version?: string;
+  last_sync?: string;
+}
+
+export interface AdapterListResponse {
+  adapters: Adapter[];
+  total: number;
+  categories: string[];
+}
+
+// Matches DocumentUploadResponse Pydantic schema
 export interface Document {
   id: string;
   filename: string;
+  file_type: string;
+  doc_type: string;
+  status: string;
+  created_at: string;
+  // legacy optional fields kept for backward compat
   content_type?: string;
-  file_type?: string;
-  doc_type?: string;
   size?: number;
   file_size?: number;
-  status: "pending" | "processing" | "completed" | "failed" | "done" | "parsed" | "parsing";
   uploaded_at?: string;
-  created_at?: string;
   processed_at?: string;
   parsed_at?: string;
 }
 
-export interface Configuration {
-  id: string;
-  name?: string;
-  adapter_type?: string;
-  adapter_version_id?: string;
-  document_id?: string;
-  status: string;
-  version?: number;
-  created_at: string;
-  updated_at: string;
-  parameters?: Record<string, unknown>;
-  field_mappings?: unknown[];
+export interface FieldMapping {
+  source_field: string;
+  target_field: string;
+  transformation?: string;
+  confidence: number;
+  is_confirmed: boolean;
 }
 
+// Matches ConfigurationResponse Pydantic schema
+export interface Configuration {
+  id: string;
+  name: string;
+  adapter_version_id: string;
+  document_id?: string;
+  status: string;
+  version: number;
+  field_mappings: FieldMapping[];
+  created_at: string;
+  updated_at: string;
+  // legacy optional fields kept for backward compat
+  adapter_type?: string;
+  parameters?: Record<string, unknown>;
+}
+
+export interface SimulationStepResult {
+  step_name: string;
+  status: string;
+  request_payload: Record<string, unknown>;
+  expected_response: Record<string, unknown>;
+  actual_response: Record<string, unknown>;
+  duration_ms: number;
+  confidence_score: number;
+  error_message?: string;
+  assertions: Record<string, unknown>[];
+}
+
+// Matches SimulationResponse Pydantic schema
 export interface Simulation {
   id: string;
-  name?: string;
-  configuration_id?: string;
-  config_id?: string;
-  scenario?: string;
+  configuration_id: string;
   status: string;
-  test_type?: string;
-  created_at?: string;
+  test_type: string;
+  total_tests: number;
+  passed_tests: number;
+  failed_tests: number;
+  duration_ms?: number;
+  steps: SimulationStepResult[];
+  created_at: string;
+  // legacy optional fields kept for backward compat
+  name?: string;
+  scenario?: string;
+  config_id?: string;
   queued_at?: string;
   completed_at?: string;
-  total_tests?: number;
-  passed_tests?: number;
-  failed_tests?: number;
-  duration_ms?: number;
   results?: SimulationResults;
-  steps?: unknown[];
 }
 
 export interface SimulationResults {
@@ -80,22 +138,40 @@ export interface SimulationResults {
   duration_ms: number;
 }
 
+// Matches AuditLogResponse Pydantic schema
 export interface AuditEntry {
   id: string;
+  tenant_id: string;
+  actor: string;
   action: string;
+  resource_type: string;
+  resource_id: string;
+  details?: Record<string, unknown>;
+  created_at: string;
+  // legacy optional fields kept for backward compat
   entity_type?: string;
-  resource_type?: string;
   entity_id?: string;
-  resource_id?: string;
   user?: string;
-  actor?: string;
   actor_email?: string;
   timestamp?: string;
-  created_at?: string;
-  details?: Record<string, unknown>;
   status?: "success" | "failure" | "warning";
   outcome?: string;
-  tenant_id?: string;
+}
+
+export interface ConfigValidationResult {
+  is_valid: boolean;
+  errors: string[];
+  warnings: string[];
+  coverage_score: number;
+  missing_required_fields: string[];
+  unmapped_source_fields: string[];
+}
+
+export interface ConfigTemplateResponse {
+  name: string;
+  description: string;
+  adapter_category: string;
+  default_config: Record<string, unknown>;
 }
 
 export interface HealthStatus {
@@ -104,12 +180,4 @@ export interface HealthStatus {
   env?: string;
   timestamp?: string;
   checks?: Record<string, unknown>;
-}
-
-export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  page_size: number;
-  has_next?: boolean;
 }

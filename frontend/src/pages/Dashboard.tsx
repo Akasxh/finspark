@@ -1,4 +1,4 @@
-import { adaptersApi, configurationsApi, documentsApi, simulationsApi } from "@/lib/api";
+import { adaptersApi, configurationsApi, documentsApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
@@ -83,15 +83,16 @@ function MetricCard({ title, value, subtitle, icon: Icon, trend, color }: Metric
 }
 
 export default function Dashboard() {
-  const adapters = useQuery({ queryKey: ["adapters"], queryFn: adaptersApi.list });
-  const documents = useQuery({ queryKey: ["documents"], queryFn: documentsApi.list });
-  const configs = useQuery({ queryKey: ["configurations"], queryFn: configurationsApi.list });
-  const sims = useQuery({ queryKey: ["simulations"], queryFn: simulationsApi.list });
+  const adapters = useQuery({ queryKey: ["adapters"], queryFn: () => adaptersApi.list() });
+  const documents = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
+  const configs = useQuery({
+    queryKey: ["configurations"],
+    queryFn: () => configurationsApi.list(),
+  });
 
-  const adapterCount = adapters.data?.length ?? 0;
-  const docCount = documents.data?.length ?? 0;
-  const configCount = configs.data?.length ?? 0;
-  const simCount = sims.data?.length ?? 0;
+  const adapterCount = adapters.data?.data?.total ?? 0;
+  const docCount = documents.data?.data?.length ?? 0;
+  const configCount = configs.data?.data?.length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -127,10 +128,9 @@ export default function Dashboard() {
         />
         <MetricCard
           title="Simulations"
-          value={simCount}
-          subtitle="Total runs"
+          value="—"
+          subtitle="Run from Simulations tab"
           icon={FlaskConical}
-          trend="98.5% success rate"
           color="bg-purple-500/10 text-purple-400"
         />
       </div>

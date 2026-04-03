@@ -14,13 +14,15 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-const adapterTypes = ["erp", "crm", "market_data", "payments", "trading"];
-
-const statusConfig = {
+const statusConfig: Record<string, { label: string; cls: string }> = {
   draft: { label: "Draft", cls: "badge-yellow" },
+  configured: { label: "Configured", cls: "badge-blue" },
+  validating: { label: "Validating", cls: "badge-blue" },
+  testing: { label: "Testing", cls: "badge-blue" },
   active: { label: "Active", cls: "badge-green" },
-  archived: { label: "Archived", cls: "badge-gray" },
-} as const;
+  deprecated: { label: "Deprecated", cls: "badge-gray" },
+  rollback: { label: "Rollback", cls: "badge-yellow" },
+};
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", {
@@ -51,14 +53,15 @@ export default function Configurations() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [adapterType, setAdapterType] = useState(adapterTypes[0]);
+  const [documentId, setDocumentId] = useState("");
+  const [adapterVersionId, setAdapterVersionId] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [generateSuccess, setGenerateSuccess] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["configurations"],
-    queryFn: configurationsApi.list,
+    queryFn: () => configurationsApi.list(),
   });
 
   const generateMutation = useMutation({
@@ -67,6 +70,8 @@ export default function Configurations() {
       queryClient.invalidateQueries({ queryKey: ["configurations"] });
       setShowForm(false);
       setName("");
+      setDocumentId("");
+      setAdapterVersionId("");
       setGenerateError(null);
       setGenerateSuccess(true);
       setTimeout(() => setGenerateSuccess(false), 4000);
@@ -76,7 +81,7 @@ export default function Configurations() {
     },
   });
 
-  const configs: Configuration[] = data ?? [];
+  const configs: Configuration[] = data?.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -128,12 +133,16 @@ export default function Configurations() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (name.trim()) {
+              if (name.trim() && documentId.trim() && adapterVersionId.trim()) {
                 setGenerateError(null);
-                generateMutation.mutate({ name: name.trim(), adapter_type: adapterType });
+                generateMutation.mutate({
+                  name: name.trim(),
+                  document_id: documentId.trim(),
+                  adapter_version_id: adapterVersionId.trim(),
+                });
               }
             }}
-            className="grid gap-4 sm:grid-cols-3"
+            className="grid gap-4 sm:grid-cols-2"
           >
             <div>
               <label htmlFor="cfg-name" className="mb-1.5 block text-xs font-medium text-gray-400">
@@ -144,32 +153,49 @@ export default function Configurations() {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., SAP Trade Settlement"
+                placeholder="e.g., Credit Bureau Integration"
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
             <div>
-              <label htmlFor="cfg-type" className="mb-1.5 block text-xs font-medium text-gray-400">
-                Adapter Type
+              <label htmlFor="cfg-doc" className="mb-1.5 block text-xs font-medium text-gray-400">
+                Document ID
               </label>
-              <select
-                id="cfg-type"
-                value={adapterType}
-                onChange={(e) => setAdapterType(e.target.value)}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              <input
+                id="cfg-doc"
+                type="text"
+                value={documentId}
+                onChange={(e) => setDocumentId(e.target.value)}
+                placeholder="Parsed document ID"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="cfg-adapter"
+                className="mb-1.5 block text-xs font-medium text-gray-400"
               >
-                {adapterTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {t.replaceAll("_", " ").toUpperCase()}
-                  </option>
-                ))}
-              </select>
+                Adapter Version ID
+              </label>
+              <input
+                id="cfg-adapter"
+                type="text"
+                value={adapterVersionId}
+                onChange={(e) => setAdapterVersionId(e.target.value)}
+                placeholder="Adapter version ID"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
             </div>
             <div className="flex items-end">
               <button
                 type="submit"
                 className="btn-primary w-full justify-center"
-                disabled={!name.trim() || generateMutation.isPending}
+                disabled={
+                  !name.trim() ||
+                  !documentId.trim() ||
+                  !adapterVersionId.trim() ||
+                  generateMutation.isPending
+                }
               >
                 <Sparkles className="h-4 w-4" />
                 {generateMutation.isPending ? "Generating..." : "Generate"}
@@ -202,7 +228,7 @@ export default function Configurations() {
           </div>
         ) : (
           configs.map((cfg) => {
-            const st = statusConfig[cfg.status];
+            const st = statusConfig[cfg.status] ?? { label: cfg.status, cls: "badge-gray" };
             const isExpanded = expandedId === cfg.id;
 
             return (
@@ -221,14 +247,14 @@ export default function Configurations() {
                       <span className={st.cls}>{st.label}</span>
                     </div>
                     <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
-                      <span className="uppercase tracking-wide">
-                        {cfg.adapter_type.replaceAll("_", " ")}
-                      </span>
+                      <span className="font-mono">v{cfg.version}</span>
                       <span>&middot;</span>
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
                         Updated {formatDate(cfg.updated_at)}
                       </span>
+                      <span>&middot;</span>
+                      <span>{cfg.field_mappings.length} field mappings</span>
                     </div>
                   </div>
                   <ChevronDown
@@ -241,7 +267,7 @@ export default function Configurations() {
                 {isExpanded && (
                   <div className="border-t border-gray-800 bg-gray-900/40 px-6 py-4">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-medium text-gray-400">Parameters</span>
+                      <span className="text-xs font-medium text-gray-400">Field Mappings</span>
                       <div className="flex gap-2">
                         <button
                           type="button"
@@ -262,10 +288,11 @@ export default function Configurations() {
                       </div>
                     </div>
                     <pre className="rounded-lg bg-gray-950 p-4 text-xs text-gray-300 overflow-x-auto">
-                      {JSON.stringify(cfg.parameters, null, 2)}
+                      {JSON.stringify(cfg.field_mappings, null, 2)}
                     </pre>
                     <div className="mt-3 text-xs text-gray-500">
-                      Created {formatDate(cfg.created_at)}
+                      Adapter version: {cfg.adapter_version_id} &middot; Created{" "}
+                      {formatDate(cfg.created_at)}
                     </div>
                   </div>
                 )}

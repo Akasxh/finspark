@@ -4,18 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Clock, Plug, RefreshCw } from "lucide-react";
 
-const statusConfig: Record<string, { label: string; cls: string }> = {
-  active: { label: "Active", cls: "badge-green" },
-  inactive: { label: "Inactive", cls: "badge-gray" },
-  error: { label: "Error", cls: "badge-red" },
-};
-
-const typeColors: Record<string, string> = {
-  erp: "text-blue-400 bg-blue-500/10",
-  crm: "text-purple-400 bg-purple-500/10",
-  market_data: "text-emerald-400 bg-emerald-500/10",
-  payments: "text-amber-400 bg-amber-500/10",
-  trading: "text-rose-400 bg-rose-500/10",
+const categoryColors: Record<string, string> = {
+  bureau: "text-blue-400 bg-blue-500/10",
+  kyc: "text-purple-400 bg-purple-500/10",
+  gst: "text-emerald-400 bg-emerald-500/10",
+  payment: "text-amber-400 bg-amber-500/10",
+  fraud: "text-rose-400 bg-rose-500/10",
+  notification: "text-cyan-400 bg-cyan-500/10",
+  open_banking: "text-indigo-400 bg-indigo-500/10",
 };
 
 function formatTimeAgo(dateStr?: string): string {
@@ -56,10 +52,10 @@ function SkeletonCard() {
 export default function Adapters() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["adapters"],
-    queryFn: adaptersApi.list,
+    queryFn: () => adaptersApi.list(),
   });
 
-  const adapters: Adapter[] = isLoading ? [] : (data ?? []);
+  const adapters: Adapter[] = isLoading ? [] : (data?.data?.adapters ?? []);
 
   return (
     <div className="space-y-6">
@@ -111,17 +107,17 @@ export default function Adapters() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {adapters.map((adapter) => {
-            const st = statusConfig[adapter.status] ?? {
-              label: adapter.status,
-              cls: "badge-gray",
-            };
-            const typeColor = typeColors[adapter.type] ?? "text-gray-400 bg-gray-500/10";
+            const statusLabel = adapter.is_active ? "Active" : "Inactive";
+            const statusCls = adapter.is_active ? "badge-green" : "badge-gray";
+            const categoryColor =
+              categoryColors[adapter.category] ?? "text-gray-400 bg-gray-500/10";
+            const latestVersion = adapter.versions[adapter.versions.length - 1]?.version;
 
             return (
               <div key={adapter.id} className="card-hover group p-5">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={clsx("rounded-lg p-2", typeColor)}>
+                    <div className={clsx("rounded-lg p-2", categoryColor)}>
                       <Plug className="h-4 w-4" aria-hidden="true" />
                     </div>
                     <div>
@@ -131,25 +127,25 @@ export default function Adapters() {
                       <span
                         className={clsx(
                           "mt-0.5 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-                          typeColor
+                          categoryColor
                         )}
                       >
-                        {adapter.type.replaceAll("_", " ")}
+                        {adapter.category.replaceAll("_", " ")}
                       </span>
                     </div>
                   </div>
-                  <span className={st.cls}>{st.label}</span>
+                  <span className={statusCls}>{statusLabel}</span>
                 </div>
                 <p className="mt-3 text-sm leading-relaxed text-gray-400">{adapter.description}</p>
                 <div className="mt-4 flex items-center justify-between border-t border-gray-800 pt-3">
                   <div className="flex items-center gap-1.5 text-xs text-gray-500">
                     <Clock className="h-3 w-3" aria-hidden="true" />
                     <span>
-                      <span className="sr-only">Last synced: </span>
-                      {formatTimeAgo(adapter.last_sync)}
+                      <span className="sr-only">Added: </span>
+                      {formatTimeAgo(adapter.created_at)}
                     </span>
                   </div>
-                  <span className="text-xs text-gray-500">v{adapter.version}</span>
+                  {latestVersion && <span className="text-xs text-gray-500">v{latestVersion}</span>}
                 </div>
               </div>
             );

@@ -17,23 +17,23 @@ import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import type { FileRejection } from "react-dropzone";
 
-const statusConfig = {
+const statusConfig: Record<
+  string,
+  { label: string; icon: React.ComponentType<{ className?: string }>; cls: string }
+> = {
   pending: { label: "Pending", icon: Clock, cls: "badge-yellow" },
   processing: { label: "Processing", icon: Loader2, cls: "badge-blue" },
+  parsing: { label: "Parsing", icon: Loader2, cls: "badge-blue" },
   completed: { label: "Completed", icon: CheckCircle2, cls: "badge-green" },
+  done: { label: "Done", icon: CheckCircle2, cls: "badge-green" },
+  parsed: { label: "Parsed", icon: CheckCircle2, cls: "badge-green" },
   failed: { label: "Failed", icon: AlertCircle, cls: "badge-red" },
-} as const;
+};
 
-function fileIcon(contentType: string) {
-  if (contentType.includes("spreadsheet") || contentType.includes("csv")) return FileSpreadsheet;
-  if (contentType.includes("xml") || contentType.includes("json")) return FileCode;
+function fileIcon(fileType: string) {
+  if (fileType === "json" || fileType === "yaml") return FileCode;
+  if (fileType === "xlsx" || fileType === "csv") return FileSpreadsheet;
   return FileText;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
 function formatDate(dateStr: string): string {
@@ -52,11 +52,11 @@ export default function Documents() {
 
   const { data, error, isLoading } = useQuery({
     queryKey: ["documents"],
-    queryFn: documentsApi.list,
+    queryFn: () => documentsApi.list(),
   });
 
   const uploadMutation = useMutation({
-    mutationFn: documentsApi.upload,
+    mutationFn: (file: File) => documentsApi.upload(file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
@@ -114,7 +114,7 @@ export default function Documents() {
     }
   }, []);
 
-  const documents: Document[] = data ?? [];
+  const documents: Document[] = data?.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -231,8 +231,12 @@ export default function Documents() {
         ) : (
           <div className="divide-y divide-gray-800/60">
             {documents.map((doc) => {
-              const st = statusConfig[doc.status];
-              const IconFile = fileIcon(doc.content_type);
+              const st = statusConfig[doc.status] ?? {
+                label: doc.status,
+                icon: Clock,
+                cls: "badge-gray",
+              };
+              const IconFile = fileIcon(doc.file_type);
               const StatusIcon = st.icon;
 
               return (
@@ -246,7 +250,7 @@ export default function Documents() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium text-gray-200">{doc.filename}</p>
                     <p className="text-xs text-gray-500">
-                      {formatSize(doc.size)} &middot; {formatDate(doc.uploaded_at)}
+                      {doc.file_type.toUpperCase()} &middot; {formatDate(doc.created_at)}
                     </p>
                   </div>
                   <span className={st.cls}>

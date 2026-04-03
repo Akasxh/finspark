@@ -2,53 +2,17 @@ import { auditApi } from "@/lib/api";
 import type { AuditEntry } from "@/types";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Play,
-  Plug,
-  RefreshCw,
-  Settings,
-  Shield,
-  Upload,
-  User,
-  XCircle,
-} from "lucide-react";
+import { Play, Plug, RefreshCw, Settings, Shield, Upload, User } from "lucide-react";
 
 const actionIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-  "document.upload": Upload,
-  "document.process": RefreshCw,
-  "simulation.run": Play,
-  "configuration.generate": Settings,
-  "configuration.update": Settings,
-  "adapter.sync": RefreshCw,
-  "adapter.activate": Plug,
-};
-
-const statusConfig: Record<
-  string,
-  {
-    icon: React.ComponentType<{ className?: string }>;
-    cls: string;
-    bg: string;
-    label: string;
-  }
-> = {
-  success: {
-    icon: CheckCircle2,
-    cls: "text-emerald-400",
-    bg: "bg-emerald-500/10",
-    label: "Success",
-  },
-  failure: { icon: XCircle, cls: "text-red-400", bg: "bg-red-500/10", label: "Failure" },
-  warning: { icon: AlertTriangle, cls: "text-amber-400", bg: "bg-amber-500/10", label: "Warning" },
-};
-
-const defaultStatus = {
-  icon: Shield,
-  cls: "text-gray-400",
-  bg: "bg-gray-500/10",
-  label: "Unknown",
+  document_upload: Upload,
+  document_process: RefreshCw,
+  run_simulation: Play,
+  generate_config: Settings,
+  transition: Settings,
+  rollback: RefreshCw,
+  adapter_sync: RefreshCw,
+  adapter_activate: Plug,
 };
 
 function formatTime(dateStr: string): string {
@@ -94,14 +58,11 @@ function SkeletonRow() {
 export default function Audit() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["audit"],
-    queryFn: auditApi.list,
+    queryFn: () => auditApi.list(),
   });
 
-  const entries: AuditEntry[] = isLoading ? [] : (data ?? []);
-
-  const successCount = entries.filter((e) => e.status === "success").length;
-  const warningCount = entries.filter((e) => e.status === "warning").length;
-  const failureCount = entries.filter((e) => e.status === "failure").length;
+  const entries: AuditEntry[] = isLoading ? [] : (data?.data?.items ?? []);
+  const total = data?.data?.total ?? 0;
 
   return (
     <div className="space-y-6">
@@ -122,46 +83,43 @@ export default function Audit() {
       {/* Summary stats */}
       <div className="grid grid-cols-3 gap-4" aria-label="Audit summary">
         <div className="card p-4 text-center">
-          <p
-            className="text-2xl font-bold text-emerald-400"
-            aria-label={`${successCount} successful`}
-          >
+          <p className="text-2xl font-bold text-white" aria-label={`${total} total events`}>
             {isLoading ? (
               <span
                 className="inline-block h-8 w-8 rounded bg-gray-800 animate-pulse"
                 aria-hidden="true"
               />
             ) : (
-              successCount
+              total
             )}
           </p>
-          <p className="text-xs text-gray-400">Successful</p>
+          <p className="text-xs text-gray-400">Total Events</p>
         </div>
         <div className="card p-4 text-center">
-          <p className="text-2xl font-bold text-amber-400" aria-label={`${warningCount} warnings`}>
+          <p className="text-2xl font-bold text-indigo-400">
             {isLoading ? (
               <span
                 className="inline-block h-8 w-8 rounded bg-gray-800 animate-pulse"
                 aria-hidden="true"
               />
             ) : (
-              warningCount
+              entries.length
             )}
           </p>
-          <p className="text-xs text-gray-400">Warnings</p>
+          <p className="text-xs text-gray-400">This Page</p>
         </div>
         <div className="card p-4 text-center">
-          <p className="text-2xl font-bold text-red-400" aria-label={`${failureCount} failures`}>
+          <p className="text-2xl font-bold text-emerald-400">
             {isLoading ? (
               <span
                 className="inline-block h-8 w-8 rounded bg-gray-800 animate-pulse"
                 aria-hidden="true"
               />
             ) : (
-              failureCount
+              new Set(entries.map((e) => e.resource_type)).size
             )}
           </p>
-          <p className="text-xs text-gray-400">Failures</p>
+          <p className="text-xs text-gray-400">Resource Types</p>
         </div>
       </div>
 
@@ -200,8 +158,6 @@ export default function Audit() {
             />
 
             {entries.map((entry, i) => {
-              const st = statusConfig[entry.status] ?? defaultStatus;
-              const StatusIcon = st.icon;
               const ActionIcon = actionIcons[entry.action] ?? Shield;
 
               return (
@@ -214,13 +170,10 @@ export default function Audit() {
                 >
                   {/* Timeline dot */}
                   <div
-                    className={clsx(
-                      "relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                      st.bg
-                    )}
+                    className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/10"
                     aria-hidden="true"
                   >
-                    <ActionIcon className={clsx("h-3.5 w-3.5", st.cls)} />
+                    <ActionIcon className="h-3.5 w-3.5 text-indigo-400" />
                   </div>
 
                   {/* Content */}
@@ -230,25 +183,21 @@ export default function Audit() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-white text-sm">
                             {entry.action
-                              .replace(".", " ")
+                              .replace(/_/g, " ")
                               .replace(/\b\w/g, (c) => c.toUpperCase())}
                           </span>
-                          <StatusIcon
-                            className={clsx("h-3.5 w-3.5", st.cls)}
-                            aria-label={st.label}
-                          />
                         </div>
                         <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                           <User className="h-3 w-3" aria-hidden="true" />
-                          <span>{entry.user}</span>
+                          <span>{entry.actor}</span>
                           <span aria-hidden="true">&middot;</span>
                           <span>
-                            {entry.entity_type}/{entry.entity_id}
+                            {entry.resource_type}/{entry.resource_id}
                           </span>
                         </div>
                       </div>
-                      <time dateTime={entry.timestamp} className="shrink-0 text-xs text-gray-500">
-                        {formatTime(entry.timestamp)}
+                      <time dateTime={entry.created_at} className="shrink-0 text-xs text-gray-500">
+                        {formatTime(entry.created_at)}
                       </time>
                     </div>
 
