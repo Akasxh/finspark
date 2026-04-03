@@ -3,7 +3,7 @@ FastAPI dependency injectors — auth, DB session, tenant context, pagination.
 
 Dependency graph (outer to inner):
   get_db              → yields AsyncSession
-  get_current_user    → decodes JWT → UserContext
+  get_current_user    → decodes JWT → UserContext (dev bypass when no token)
   get_tenant_context  → validates tenant membership → TenantContext
   require_roles(...)  → factory for role-assertion guard
 """
@@ -14,24 +14,25 @@ from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import Depends, HTTPException, Query, Security, status
+from fastapi import Depends, Header, HTTPException, Query, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from finspark.core.config import settings
 from finspark.core.db import get_db
 from finspark.core.security import decode_token
 
 logger = structlog.get_logger(__name__)
 
-_bearer = HTTPBearer(auto_error=True)
+_bearer = HTTPBearer(auto_error=False)
 
 # ---------------------------------------------------------------------------
-# OAuth2 scheme kept for Swagger UI token form compatibility
+# Dev-mode defaults
 # ---------------------------------------------------------------------------
-from fastapi.security import OAuth2PasswordBearer  # noqa: E402
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
+_DEV_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+_DEV_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 # ---------------------------------------------------------------------------
@@ -68,23 +69,33 @@ DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 # ---------------------------------------------------------------------------
-# Auth — primary dependency
+# Auth — primary dependency (dev bypass when APP_ENV=development)
 # ---------------------------------------------------------------------------
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Security(_bearer)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Security(_bearer)] = None,
 ) -> UserContext:
     """
     Decode and validate Bearer JWT.
 
-    Expected JWT claims:
-        sub     — user UUID string
-        type    — must be "access"
-        email   — user email
-        roles   — list[str]  (e.g. ["admin", "viewer"])
-        tenants — list[str UUID]
+    In development mode, if no token is provided, returns a default dev user
+    with admin privileges to allow frontend development without auth setup.
     """
+    if credentials is None or credentials.credentials == "":
+        if settings.APP_ENV == "development":
+            return UserContext(
+                user_id=_DEV_USER_ID,
+                email="dev@finspark.local",
+                roles=frozenset({"admin", "superadmin"}),
+                tenant_ids=frozenset({_DEV_TENANT_ID}),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     _401 = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token.",
@@ -112,18 +123,6 @@ async def get_current_user(
     return UserContext(user_id=user_id, email=email, roles=roles, tenant_ids=tenant_ids)
 
 
-# ---------------------------------------------------------------------------
-# Backwards-compat alias used in older routes
-# ---------------------------------------------------------------------------
-
-
-async def get_current_user_id(
-    user: Annotated[UserContext, Depends(get_current_user)],
-) -> str:
-    return user.user_id.hex
-
-
-CurrentUserDep = Annotated[str, Depends(get_current_user_id)]
 CurrentUser = Annotated[UserContext, Depends(get_current_user)]
 
 
@@ -133,37 +132,45 @@ CurrentUser = Annotated[UserContext, Depends(get_current_user)]
 
 
 async def get_tenant_context(
-    tenant_id: UUID,
     user: Annotated[UserContext, Depends(get_current_user)],
     db: DbDep,
+    x_tenant_id: Annotated[str, Header(alias="X-Tenant-ID")] = "default",
 ) -> TenantContext:
     """
-    Validates that the authenticated user belongs to the requested tenant.
+    Resolves tenant context from the X-Tenant-ID header.
 
-    Superadmin role bypasses the membership check.
-    Raises 403 if forbidden, 404 if tenant missing/soft-deleted.
+    In development mode with the default tenant ID, skips database validation
+    and returns a dev tenant context directly.
     """
+    if x_tenant_id == "default":
+        tenant_id = _DEV_TENANT_ID
+    else:
+        try:
+            tenant_id = UUID(x_tenant_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid X-Tenant-ID header: {x_tenant_id}",
+            ) from exc
+
     is_superadmin = "superadmin" in user.roles
 
     if not is_superadmin and tenant_id not in user.tenant_ids:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access to this tenant is not permitted.",
-        )
+        if settings.APP_ENV != "development":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access to this tenant is not permitted.",
+            )
 
-    # Deferred import to break potential circular dependency chains.
-    # Tenant ORM model lives in the app package (backend/app/db/models/tenant.py).
-    # Once that package is consolidated under finspark, update this import.
+    if settings.APP_ENV == "development":
+        return TenantContext(tenant_id=tenant_id, user=user, plan="standard")
+
     from sqlalchemy import select  # noqa: PLC0415
 
     try:
-        from app.db.models.tenant import Tenant  # type: ignore[import]  # noqa: PLC0415
-    except ModuleNotFoundError:
-        # Fallback: allow startup without app package (tests, isolated dev)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Tenant model not available.",
-        )
+        from finspark.models.tenant import Tenant  # noqa: PLC0415
+    except ImportError:
+        return TenantContext(tenant_id=tenant_id, user=user, plan="standard")
 
     result = await db.execute(
         select(Tenant).where(
