@@ -136,31 +136,78 @@ class DocumentParser:
         paths = spec.get("paths", {})
         servers = spec.get("servers", [])
 
-        # Extract endpoints
+        # Extract endpoints and inline request/response fields
         for path, methods in paths.items():
             for method, details in methods.items():
-                if method in ("get", "post", "put", "delete", "patch"):
-                    params = []
-                    for p in details.get("parameters", []):
-                        params.append(
-                            {
-                                "name": p.get("name", ""),
-                                "in": p.get("in", "query"),
-                                "required": str(p.get("required", False)),
-                            }
-                        )
+                if method not in ("get", "post", "put", "delete", "patch"):
+                    continue
 
-                    endpoints.append(
-                        ExtractedEndpoint(
-                            path=path,
-                            method=method.upper(),
-                            description=details.get("summary", details.get("description", "")),
-                            parameters=params,
-                            is_mandatory=True,
-                        )
+                params = []
+                for p in details.get("parameters", []):
+                    params.append(
+                        {
+                            "name": p.get("name", ""),
+                            "in": p.get("in", "query"),
+                            "required": str(p.get("required", False)),
+                        }
                     )
 
-        # Extract fields from schemas
+                endpoints.append(
+                    ExtractedEndpoint(
+                        path=path,
+                        method=method.upper(),
+                        description=details.get("summary", details.get("description", "")),
+                        parameters=params,
+                        is_mandatory=True,
+                    )
+                )
+
+                # Extract fields from inline requestBody schema
+                req_body = details.get("requestBody", {})
+                req_schema = (
+                    req_body.get("content", {})
+                    .get("application/json", {})
+                    .get("schema", {})
+                )
+                if req_schema.get("properties"):
+                    section = f"{method.upper()} {path} request"
+                    req_required = set(req_schema.get("required", []))
+                    for fname, fdef in req_schema["properties"].items():
+                        fields.append(
+                            ExtractedField(
+                                name=fname,
+                                data_type=fdef.get("type", "string"),
+                                description=fdef.get("description", ""),
+                                is_required=fname in req_required,
+                                sample_value=str(fdef.get("example", "")),
+                                source_section=section,
+                            )
+                        )
+
+                # Extract fields from inline response schema (200/201/202)
+                for status_code in ("200", "201", "202"):
+                    resp_schema = (
+                        details.get("responses", {})
+                        .get(status_code, {})
+                        .get("content", {})
+                        .get("application/json", {})
+                        .get("schema", {})
+                    )
+                    if resp_schema.get("properties"):
+                        section = f"{method.upper()} {path} response"
+                        for fname, fdef in resp_schema["properties"].items():
+                            fields.append(
+                                ExtractedField(
+                                    name=fname,
+                                    data_type=fdef.get("type", "string"),
+                                    description=fdef.get("description", ""),
+                                    is_required=False,
+                                    sample_value=str(fdef.get("example", "")),
+                                    source_section=section,
+                                )
+                            )
+
+        # Extract fields from components.schemas (named schemas)
         schemas = spec.get("components", {}).get("schemas", {})
         for schema_name, schema_def in schemas.items():
             required_fields = set(schema_def.get("required", []))
@@ -176,6 +223,15 @@ class DocumentParser:
                         source_section=schema_name,
                     )
                 )
+
+        # Deduplicate fields by name (keep first occurrence)
+        seen_fields: set[str] = set()
+        unique_fields: list[ExtractedField] = []
+        for f in fields:
+            if f.name not in seen_fields:
+                seen_fields.add(f.name)
+                unique_fields.append(f)
+        fields = unique_fields
 
         # Extract auth
         auth_reqs: list[ExtractedAuth] = []
