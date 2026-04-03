@@ -108,6 +108,23 @@ async def readiness(db: DbDep) -> HealthResponse:
         ComponentHealth(name="database", status=db_status, latency_ms=db_latency, error=db_error)
     )
 
+    # AI / Gemini probe — verify key is configured when AI features are enabled
+    gemini_key = settings.GEMINI_API_KEY.strip()
+    if gemini_key:
+        components.append(ComponentHealth(name="ai", status=ComponentStatus.OK))
+    else:
+        ai_status = ComponentStatus.DEGRADED
+        if overall == ComponentStatus.OK:
+            overall = ComponentStatus.DEGRADED
+        components.append(
+            ComponentHealth(
+                name="ai",
+                status=ai_status,
+                error="GEMINI_API_KEY is not set; AI features are disabled",
+            )
+        )
+        logger.warning("health_ai_key_missing")
+
     response = HealthResponse(
         status=overall,
         version="0.1.0",
