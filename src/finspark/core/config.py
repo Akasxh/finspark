@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     openai_api_key: str = ""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3-flash"
     ai_enabled: bool = False
 
     model_config = {"env_prefix": "FINSPARK_", "env_file": ".env", "extra": "ignore"}
