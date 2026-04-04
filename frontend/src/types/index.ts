@@ -189,3 +189,51 @@ export interface HealthStatus {
   timestamp?: string;
   checks?: Record<string, unknown>;
 }
+
+export interface ConfigSummaryResponse {
+  total: number;
+  by_status: Record<string, number>;
+  by_adapter: Record<string, number>;
+  avg_confidence: number;
+}
+
+export interface ConfigDiffItem {
+  path: string;
+  change_type: "added" | "removed" | "modified";
+  old_value: unknown;
+  new_value: unknown;
+  is_breaking: boolean;
+}
+
+export interface ConfigDiffResponse {
+  config_a_id: string;
+  config_b_id: string;
+  total_changes: number;
+  breaking_changes: number;
+  diffs: ConfigDiffItem[];
+}
+
+export interface DeprecationInfo {
+  version: string;
+  status: "active" | "deprecated" | "sunset";
+  sunset_date: string | null;
+  days_until_sunset: number | null;
+  replacement_version: string | null;
+  migration_guide: Array<{ action: string; description: string }>;
+}
+
+export interface SearchResult {
+  type: string;
+  id: string;
+  name: string;
+  score: number;
+  details: Record<string, unknown>;
+}
+
+export interface SearchResponse {
+  query: string;
+  total: number;
+  adapters: SearchResult[];
+  configurations: SearchResult[];
+  simulations: SearchResult[];
+}

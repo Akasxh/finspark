@@ -50,6 +50,7 @@ packages = ["src/finspark"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
 addopts = "-v --tb=short --cov=src/finspark --cov-report=term-missing"
 
 [tool.ruff]

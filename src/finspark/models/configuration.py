@@ -13,9 +13,11 @@ class Configuration(Base, UUIDMixin, TenantMixin, TimestampMixin):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     adapter_version_id: Mapped[str] = mapped_column(
-        ForeignKey("adapter_versions.id"), nullable=False
+        ForeignKey("adapter_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"), nullable=True)
+    document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(
         String(20), default="draft"
     )  # draft, configured, validating, testing, active, deprecated, rollback
@@ -33,7 +35,9 @@ class ConfigurationHistory(Base, UUIDMixin, TenantMixin, TimestampMixin):
 
     __tablename__ = "configuration_history"
 
-    configuration_id: Mapped[str] = mapped_column(ForeignKey("configurations.id"), nullable=False)
+    configuration_id: Mapped[str] = mapped_column(
+        ForeignKey("configurations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     change_type: Mapped[str] = mapped_column(
         String(50), nullable=False

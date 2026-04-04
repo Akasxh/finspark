@@ -771,7 +771,7 @@ class TestCrossCuttingConcerns:
         assert "detail" in body
 
         # Clean up so other tests are not affected
-        rate_limiter.reset()
+        await rate_limiter.reset()
 
     @pytest.mark.asyncio
     async def test_security_headers_present(self, client: AsyncClient) -> None:

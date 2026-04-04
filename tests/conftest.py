@@ -1,5 +1,10 @@
 """Pytest configuration and shared fixtures."""
 
+import os
+
+# Must be set before any finspark imports so Settings loads with debug=True.
+os.environ.setdefault("FINSPARK_DEBUG", "true")
+
 import asyncio
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -9,6 +14,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 # Import all models so Base.metadata has complete table definitions
 import finspark.models.adapter  # noqa: F401
@@ -22,10 +28,16 @@ from finspark.core.database import get_db
 from finspark.main import app
 from finspark.models.base import Base
 
-TEST_DB_URL = "sqlite+aiosqlite:///./test_finspark.db"
+# In-memory SQLite with StaticPool — avoids file corruption and is fast
+TEST_DB_URL = "sqlite+aiosqlite://"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
-engine = create_async_engine(TEST_DB_URL, echo=False)
+engine = create_async_engine(
+    TEST_DB_URL,
+    echo=False,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
 test_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -38,10 +50,7 @@ def event_loop():
 
 @pytest.fixture(scope="session", autouse=True)
 def enable_debug_mode_for_tests():
-    """Enable debug mode for all tests so header-based tenant auth is active.
-
-    Production JWT enforcement is tested explicitly in test_auth_middleware.py.
-    """
+    """Enable debug mode for all tests so header-based tenant auth is active."""
     with patch("finspark.core.middleware.settings") as mock_settings:
         mock_settings.debug = True
         yield mock_settings
@@ -54,8 +63,6 @@ async def setup_database():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest_asyncio.fixture

@@ -1,8 +1,12 @@
 """Simple event system for decoupled communication between services."""
 
+import inspect
+import logging
 from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[dict[str, Any]], None]
 
@@ -14,13 +18,15 @@ def on(event_type: str, handler: EventHandler) -> None:
     _handlers[event_type].append(handler)
 
 
-def emit(event_type: str, data: dict[str, Any]) -> None:
+async def emit(event_type: str, data: dict[str, Any]) -> None:
     """Emit an event to all registered handlers."""
     for handler in _handlers.get(event_type, []):
         try:
-            handler(data)
+            result = handler(data)
+            if inspect.isawaitable(result):
+                await result
         except Exception:
-            pass  # Don't let handler failures propagate
+            logger.exception("Event handler failed for %s", event_type)
 
 
 def clear() -> None:

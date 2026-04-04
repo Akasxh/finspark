@@ -2,7 +2,10 @@ import { useToast } from "@/components/Toast";
 import { adaptersApi, configurationsApi, documentsApi } from "@/lib/api";
 import type {
   Adapter,
+  ConfigDiffItem,
+  ConfigDiffResponse,
   ConfigHistoryEntry,
+  ConfigTemplateResponse,
   ConfigValidationResult,
   Configuration,
   FieldMapping,
@@ -16,14 +19,18 @@ import {
   ChevronRight,
   Clock,
   Download,
+  GitCompare,
   History,
+  Loader2,
   PlayCircle,
   Plus,
   Rocket,
   RotateCcw,
   Save,
   Settings,
+  ShieldCheck,
   Sparkles,
+  X,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -290,8 +297,19 @@ function HistoryPanel({ configId, currentVersion }: { configId: string; currentV
 
 function MappingsTable({ cfg }: { cfg: Configuration }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [mappings, setMappings] = useState<FieldMapping[]>(() => cfg.field_mappings.map((fm) => ({ ...fm })));
   const [isDirty, setIsDirty] = useState(false);
+
+  const saveMutation = useMutation({
+    mutationFn: (fms: FieldMapping[]) => configurationsApi.update(cfg.id, { field_mappings: fms }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["configurations"] });
+      setIsDirty(false);
+      toast("Mappings saved.", "success");
+    },
+    onError: () => { toast("Failed to save mappings.", "error"); },
+  });
 
   const updateTarget = (idx: number, value: string) => {
     setMappings((prev) => { const next = [...prev]; next[idx] = { ...next[idx], target_field: value }; return next; });
@@ -318,10 +336,11 @@ function MappingsTable({ cfg }: { cfg: Configuration }) {
             type="button"
             className="btn-primary"
             style={{ fontSize: 11, padding: "4px 10px" }}
-            onClick={() => { toast("Mappings saved (PATCH pending backend support).", "success"); setIsDirty(false); }}
+            onClick={() => saveMutation.mutate(mappings)}
+            disabled={saveMutation.isPending}
           >
             <Save style={{ width: 11, height: 11 }} />
-            Save
+            {saveMutation.isPending ? "Saving..." : "Save"}
           </button>
         )}
       </div>
@@ -484,6 +503,263 @@ function ConfigDetail({ cfg }: { cfg: Configuration }) {
   );
 }
 
+// ── Templates Section ─────────────────────────────────────────────────────────
+
+function TemplatesSection({ onSelect }: { onSelect: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["config-templates"],
+    queryFn: () => configurationsApi.getTemplates(),
+    enabled: open,
+  });
+
+  const templates: ConfigTemplateResponse[] = data?.data ?? [];
+
+  const CATEGORY_BADGE: Record<string, string> = {
+    banking: "badge-blue",
+    payments: "badge-green",
+    credit: "badge-yellow",
+    insurance: "badge-blue",
+    investments: "badge-teal",
+  };
+
+  return (
+    <div style={{ marginBottom: 4 }}>
+      <button
+        type="button"
+        className="btn-secondary"
+        style={{ fontSize: 12, padding: "5px 12px", marginBottom: open ? 14 : 0 }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Sparkles style={{ width: 13, height: 13 }} />
+        {open ? "Hide Templates" : "Browse Templates"}
+        <ChevronDown style={{
+          width: 12, height: 12, marginLeft: 2,
+          transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 150ms ease",
+        }} />
+      </button>
+
+      {open && (
+        <div className="animate-fade-in">
+          {isLoading && (
+            <p style={{ fontSize: 12, color: "var(--color-text-muted)", padding: "8px 0" }}>Loading templates...</p>
+          )}
+          {isError && (
+            <p style={{ fontSize: 12, color: "var(--color-error-text)", padding: "8px 0" }}>Failed to load templates.</p>
+          )}
+          {!isLoading && !isError && templates.length === 0 && (
+            <p style={{ fontSize: 12, color: "var(--color-text-muted)", padding: "8px 0" }}>No templates available.</p>
+          )}
+          {templates.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+              {templates.map((tpl) => {
+                const badgeCls = CATEGORY_BADGE[tpl.adapter_category.toLowerCase()] ?? "badge-gray";
+                return (
+                  <button
+                    key={tpl.name}
+                    type="button"
+                    className="card-hover"
+                    onClick={() => { onSelect(tpl.name); setOpen(false); }}
+                    style={{
+                      display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8,
+                      padding: 14, borderRadius: 8, cursor: "pointer", textAlign: "left",
+                      border: "1px solid var(--color-border)",
+                      background: "var(--color-bg-elevated)",
+                      transition: "border-color 120ms ease, background 120ms ease",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--color-brand-light)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--color-border)"; }}
+                  >
+                    <span className={badgeCls} style={{ fontSize: 10, textTransform: "capitalize" }}>
+                      {tpl.adapter_category}
+                    </span>
+                    <div>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)", marginBottom: 3 }}>
+                        {tpl.name}
+                      </p>
+                      <p style={{ fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.4 }}>
+                        {tpl.description}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Compare Modal ─────────────────────────────────────────────────────────────
+
+const CHANGE_TYPE_STYLE: Record<ConfigDiffItem["change_type"], { color: string; bg: string; label: string }> = {
+  added:    { color: "#22c55e", bg: "rgba(34,197,94,0.08)",   label: "Added" },
+  removed:  { color: "#ef4444", bg: "rgba(239,68,68,0.08)",   label: "Removed" },
+  modified: { color: "#d97706", bg: "rgba(217,119,6,0.08)",   label: "Modified" },
+};
+
+function CompareModal({ configs, onClose }: { configs: Configuration[]; onClose: () => void }) {
+  const [configAId, setConfigAId] = useState(configs[0]?.id ?? "");
+  const [configBId, setConfigBId] = useState(configs[1]?.id ?? "");
+  const [result, setResult] = useState<ConfigDiffResponse | null>(null);
+  const [diffError, setDiffError] = useState<string | null>(null);
+
+  const diffMutation = useMutation({
+    mutationFn: () => configurationsApi.diff(configAId, configBId),
+    onSuccess: (resp) => { setResult(resp.data ?? null); setDiffError(null); },
+    onError: () => { setDiffError("Failed to fetch diff. Check your selection."); },
+  });
+
+  const selectStyle: React.CSSProperties = {
+    width: "100%", borderRadius: 6, border: "1px solid var(--color-border-strong)",
+    background: "var(--color-bg-raised)", padding: "8px 12px",
+    fontSize: 13, color: "var(--color-text-primary)", outline: "none",
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 50,
+        background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+      }}
+      role="presentation"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+    >
+      <div
+        style={{
+          background: "var(--color-bg-elevated)", border: "1px solid var(--color-border-strong)",
+          borderRadius: 12, padding: 24, width: "100%", maxWidth: 680,
+          maxHeight: "80vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 20,
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <GitCompare style={{ width: 16, height: 16, color: "var(--color-brand-light)" }} />
+            <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-primary)", margin: 0 }}>
+              Compare Configurations
+            </h2>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", padding: 4 }}>
+            <X style={{ width: 16, height: 16 }} />
+          </button>
+        </div>
+
+        {/* Selectors */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div>
+            <label htmlFor="diff-config-a" style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+              Config A (Base)
+            </label>
+            <select id="diff-config-a" value={configAId} onChange={(e) => { setConfigAId(e.target.value); setResult(null); }} style={selectStyle}>
+              {configs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="diff-config-b" style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+              Config B (Compare)
+            </label>
+            <select id="diff-config-b" value={configBId} onChange={(e) => { setConfigBId(e.target.value); setResult(null); }} style={selectStyle}>
+              {configs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={!configAId || !configBId || configAId === configBId || diffMutation.isPending}
+          onClick={() => diffMutation.mutate()}
+          style={{ alignSelf: "flex-start" }}
+        >
+          {diffMutation.isPending
+            ? <><Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> Comparing…</>
+            : <><GitCompare style={{ width: 14, height: 14 }} /> Run Diff</>
+          }
+        </button>
+
+        {configAId === configBId && configAId && (
+          <p style={{ fontSize: 12, color: "var(--color-warning-text)" }}>Select two different configurations to compare.</p>
+        )}
+
+        {diffError && (
+          <p style={{ fontSize: 12, color: "var(--color-error-text)" }}>{diffError}</p>
+        )}
+
+        {/* Results */}
+        {result && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", gap: 16 }}>
+              <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                <strong style={{ color: "var(--color-text-primary)" }}>{result.total_changes}</strong> total changes
+              </span>
+              {result.breaking_changes > 0 && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#ef4444" }}>
+                  ⚠ {result.breaking_changes} breaking
+                </span>
+              )}
+            </div>
+
+            {result.diffs.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>No differences found.</p>
+            ) : (
+              <div style={{ overflowX: "auto", borderRadius: 6, border: "1px solid var(--color-border)" }}>
+                <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-bg-base)" }}>
+                      {["Path", "Type", "Old Value", "New Value", "Breaking"].map((h) => (
+                        <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.diffs.map((diff, i) => {
+                      const ct = CHANGE_TYPE_STYLE[diff.change_type];
+                      return (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: diff items have no stable id
+                        <tr key={i} style={{ borderBottom: "1px solid var(--color-border)", background: ct.bg }}>
+                          <td style={{ padding: "8px 12px" }}>
+                            <code style={{ fontFamily: "monospace", fontSize: 11, color: "var(--color-text-primary)" }}>{diff.path}</code>
+                          </td>
+                          <td style={{ padding: "8px 12px" }}>
+                            <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: ct.color, background: `${ct.color}18`, border: `1px solid ${ct.color}40`, borderRadius: 4, padding: "2px 7px" }}>
+                              {ct.label}
+                            </span>
+                          </td>
+                          <td style={{ padding: "8px 12px", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <code style={{ fontFamily: "monospace", fontSize: 11, color: "#ef4444" }}>
+                              {diff.old_value !== null && diff.old_value !== undefined ? String(diff.old_value) : "—"}
+                            </code>
+                          </td>
+                          <td style={{ padding: "8px 12px", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <code style={{ fontFamily: "monospace", fontSize: 11, color: "#22c55e" }}>
+                              {diff.new_value !== null && diff.new_value !== undefined ? String(diff.new_value) : "—"}
+                            </code>
+                          </td>
+                          <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                            {diff.is_breaking && <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 700 }}>Yes</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Generate Form ─────────────────────────────────────────────────────────────
 
 const inputStyle: React.CSSProperties = {
@@ -541,12 +817,16 @@ function GenerateForm({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="card animate-fade-in" style={{ padding: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-        <Sparkles style={{ width: 16, height: 16, color: "var(--color-brand-light)" }} />
-        <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-primary)" }}>Generate Configuration</h2>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Sparkles style={{ width: 16, height: 16, color: "var(--color-brand-light)" }} />
+          <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-primary)" }}>Generate Configuration</h2>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
+      <TemplatesSection onSelect={(tplName) => setName(tplName)} />
+
+      <form onSubmit={handleSubmit} style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginTop: 16 }}>
         <div>
           <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
             Document
@@ -624,6 +904,7 @@ export default function Configurations() {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["configurations"],
@@ -635,15 +916,36 @@ export default function Configurations() {
       configurationsApi.transition(id, targetState),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["configurations"] });
+      queryClient.invalidateQueries({ queryKey: ["config-history"] });
       toast("State updated.", "success");
     },
     onError: () => { toast("Transition failed.", "error"); },
+  });
+
+  const batchValidateMutation = useMutation({
+    mutationFn: (configIds: string[]) => configurationsApi.batchValidate(configIds),
+    onSuccess: (resp) => {
+      const d = resp.data as Record<string, unknown> | null;
+      if (d && typeof d === "object") {
+        const valid = (d.valid_count as number | undefined) ?? (d.valid as unknown[])?.length ?? "?";
+        const invalid = (d.invalid_count as number | undefined) ?? (d.invalid as unknown[])?.length ?? "?";
+        toast(`Batch validate complete: ${valid} valid, ${invalid} invalid.`, "success");
+      } else {
+        toast("Batch validate complete.", "success");
+      }
+    },
+    onError: () => { toast("Batch validate failed.", "error"); },
   });
 
   const configs: Configuration[] = data?.data ?? [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Compare modal */}
+      {showCompare && configs.length >= 2 && (
+        <CompareModal configs={configs} onClose={() => setShowCompare(false)} />
+      )}
+
       {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
@@ -652,13 +954,37 @@ export default function Configurations() {
             Generate and manage integration configurations
           </p>
         </div>
-        <button
-          type="button"
-          className={showForm ? "btn-secondary" : "btn-primary"}
-          onClick={() => setShowForm((v) => !v)}
-        >
-          {showForm ? "Cancel" : <><Plus style={{ width: 15, height: 15 }} /> Generate Config</>}
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {configs.length >= 2 && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setShowCompare(true)}
+            >
+              <GitCompare style={{ width: 14, height: 14 }} /> Compare
+            </button>
+          )}
+          {configs.length > 0 && (
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={batchValidateMutation.isPending}
+              onClick={() => batchValidateMutation.mutate(configs.map((c) => c.id))}
+            >
+              {batchValidateMutation.isPending
+                ? <><Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> Validating…</>
+                : <><ShieldCheck style={{ width: 14, height: 14 }} /> Validate All</>
+              }
+            </button>
+          )}
+          <button
+            type="button"
+            className={showForm ? "btn-secondary" : "btn-primary"}
+            onClick={() => setShowForm((v) => !v)}
+          >
+            {showForm ? "Cancel" : <><Plus style={{ width: 15, height: 15 }} /> Generate Config</>}
+          </button>
+        </div>
       </div>
 
       {/* Error banner */}

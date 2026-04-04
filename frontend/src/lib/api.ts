@@ -3,13 +3,18 @@ import type {
   Adapter,
   AdapterListResponse,
   AuditEntry,
+  ConfigDiffResponse,
   ConfigHistoryEntry,
+  ConfigSummaryResponse,
   ConfigTemplateResponse,
   ConfigValidationResult,
   Configuration,
+  DeprecationInfo,
   Document,
+  FieldMapping,
   HealthStatus,
   PaginatedResponse,
+  SearchResponse,
   Simulation,
 } from "@/types";
 import axios from "axios";
@@ -44,6 +49,14 @@ export const adaptersApi = {
       })
       .then((r) => r.data),
   get: (id: string) => api.get<APIResponse<Adapter>>(`/api/v1/adapters/${id}`).then((r) => r.data),
+  match: (adapterId: string, services: string) =>
+    api
+      .get<APIResponse<unknown>>(`/api/v1/adapters/${adapterId}/match`, { params: { services } })
+      .then((r) => r.data),
+  deprecation: (adapterId: string, version: string) =>
+    api
+      .get<APIResponse<DeprecationInfo>>(`/api/v1/adapters/${adapterId}/versions/${version}/deprecation`)
+      .then((r) => r.data),
 };
 
 export const documentsApi = {
@@ -84,7 +97,7 @@ export const configurationsApi = {
       .then((r) => r.data),
   transition: (id: string, targetState: string, reason?: string) =>
     api
-      .post<APIResponse<Configuration>>(`/api/v1/configurations/${id}/transition`, {
+      .post<APIResponse<{ id: string; previous_state: string; new_state: string; available_transitions: string[] }>>(`/api/v1/configurations/${id}/transition`, {
         target_state: targetState,
         reason,
       })
@@ -103,10 +116,34 @@ export const configurationsApi = {
       .then((r) => r.data),
   rollback: (id: string, targetVersion: number) =>
     api
-      .post<APIResponse<Configuration>>(`/api/v1/configurations/${id}/rollback`, {
+      .post<APIResponse<{ id: string; name: string; previous_version: number; restored_version: number; status: string }>>(`/api/v1/configurations/${id}/rollback`, {
         target_version: targetVersion,
       })
       .then((r) => r.data),
+  getSummary: () =>
+    api
+      .get<APIResponse<ConfigSummaryResponse>>("/api/v1/configurations/summary")
+      .then((r) => r.data),
+  diff: (configAId: string, configBId: string) =>
+    api
+      .get<APIResponse<ConfigDiffResponse>>(`/api/v1/configurations/${configAId}/diff/${configBId}`)
+      .then((r) => r.data),
+  compareVersions: (configId: string, v1: number, v2: number) =>
+    api
+      .get<APIResponse<ConfigDiffResponse>>(`/api/v1/configurations/${configId}/history/compare`, {
+        params: { v1, v2 },
+      })
+      .then((r) => r.data),
+  batchValidate: (configIds: string[]) =>
+    api
+      .post<APIResponse<unknown>>("/api/v1/configurations/batch-validate", { config_ids: configIds })
+      .then((r) => r.data),
+  batchSimulate: (configIds: string[]) =>
+    api
+      .post<APIResponse<unknown>>("/api/v1/configurations/batch-simulate", { config_ids: configIds })
+      .then((r) => r.data),
+  update: (id: string, data: { name?: string; field_mappings?: FieldMapping[]; notes?: string }) =>
+    api.patch<APIResponse<Configuration>>(`/api/v1/configurations/${id}`, data).then((r) => r.data),
 };
 
 export const simulationsApi = {
@@ -144,31 +181,40 @@ export interface DashboardAnalytics {
 export const analyticsApi = {
   dashboard: () =>
     api.get<APIResponse<DashboardAnalytics>>("/api/v1/analytics/dashboard").then((r) => r.data),
+  health: () =>
+    api.get<APIResponse<unknown>>("/api/v1/analytics/health").then((r) => r.data),
+};
+
+export const metricsApi = {
+  get: () => api.get<string>("/metrics").then((r) => r.data),
 };
 
 export const searchApi = {
   search: (q: string) =>
     api
-      .get(`/api/v1/search/?q=${encodeURIComponent(q)}`, {
+      .get<APIResponse<SearchResponse>>(`/api/v1/search/?q=${encodeURIComponent(q)}`, {
         headers: { "X-Tenant-ID": "default" },
       })
       .then((r) => r.data),
 };
 
+interface WebhookEntry { id: string; tenant_id: string; url: string; events: string[]; is_active: boolean; created_at: string; }
+interface WebhookTestResult { id: string; webhook_id: string; event_type: string; status: string; response_code: number | null; attempts: number; created_at: string; }
+
 export const webhooksApi = {
   list: () =>
-    api.get("/api/v1/webhooks/", { headers: { "X-Tenant-ID": "default" } }).then((r) => r.data),
+    api.get<APIResponse<WebhookEntry[]>>("/api/v1/webhooks/", { headers: { "X-Tenant-ID": "default" } }).then((r) => r.data),
   create: (data: { url: string; events: string[]; secret?: string }) =>
     api
-      .post("/api/v1/webhooks/", data, { headers: { "X-Tenant-ID": "default" } })
+      .post<APIResponse<WebhookEntry>>("/api/v1/webhooks/", data, { headers: { "X-Tenant-ID": "default" } })
       .then((r) => r.data),
   delete: (id: string) =>
     api
-      .delete(`/api/v1/webhooks/${id}`, { headers: { "X-Tenant-ID": "default" } })
+      .delete<APIResponse<{ message: string }>>(`/api/v1/webhooks/${id}`, { headers: { "X-Tenant-ID": "default" } })
       .then((r) => r.data),
   test: (id: string) =>
     api
-      .post(`/api/v1/webhooks/${id}/test`, {}, { headers: { "X-Tenant-ID": "default" } })
+      .post<APIResponse<WebhookTestResult>>(`/api/v1/webhooks/${id}/test`, {}, { headers: { "X-Tenant-ID": "default" } })
       .then((r) => r.data),
 };
 

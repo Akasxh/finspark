@@ -149,7 +149,8 @@ class TestRollbackManagerRollback:
         restored = await mgr.rollback(config.id, 1, TENANT, changed_by="tester")
 
         assert restored.status == "rollback"
-        assert restored.version == 3  # was 2, incremented
+        # snapshot() consumes v3 (pre_rollback), so rollback lands on v4
+        assert restored.version == 4
         restored_full = json.loads(restored.full_config)  # type: ignore[arg-type]
         assert restored_full["base_url"] == "https://api.test.com/v1"
 
@@ -322,7 +323,7 @@ class TestRollbackAPIEndpoints:
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
-        assert data["data"]["restored_version"] == 3
+        assert data["data"]["restored_version"] == 4
         assert data["data"]["status"] == "rollback"
 
     async def test_rollback_invalid_version_returns_400(

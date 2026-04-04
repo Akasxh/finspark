@@ -1,18 +1,22 @@
 """Document upload and parsing routes."""
 
-import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from finspark.api.dependencies import get_audit_service, get_document_parser, get_tenant_context
+from finspark.api.dependencies import (
+    get_audit_service,
+    get_document_parser,
+    get_tenant_context,
+    require_role,
+)
 from finspark.core.audit import AuditService
 from finspark.core.config import settings
 from finspark.core.database import get_db
 from finspark.models.document import Document
-from finspark.schemas.common import APIResponse, TenantContext
+from finspark.schemas.common import APIResponse, DocType, TenantContext
 from finspark.schemas.documents import (
     DocumentDetailResponse,
     DocumentUploadResponse,
@@ -30,7 +34,7 @@ async def upload_document(
     file: UploadFile,
     doc_type: str = "brd",
     db: AsyncSession = Depends(get_db),
-    tenant: TenantContext = Depends(get_tenant_context),
+    tenant: TenantContext = require_role("admin", "editor"),
     parser: DocumentParser = Depends(get_document_parser),
     audit: AuditService = Depends(get_audit_service),
 ) -> APIResponse[DocumentUploadResponse]:
@@ -38,25 +42,49 @@ async def upload_document(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
 
-    suffix = Path(file.filename).suffix.lower()
+    # Sanitize filename to prevent path traversal
+    safe_name = PurePosixPath(file.filename).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    suffix = Path(safe_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type: {suffix}. Allowed: {ALLOWED_EXTENSIONS}",
         )
 
+    # Validate doc_type against the DocType enum
+    try:
+        DocType(doc_type)
+    except ValueError:
+        valid = [e.value for e in DocType]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid doc_type '{doc_type}'. Allowed: {valid}",
+        )
+
+    # Validate file size before writing to disk
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    file_bytes = await file.read()
+    if len(file_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds maximum upload size of {settings.max_upload_size_mb} MB",
+        )
+
     # Save file
     upload_dir = settings.upload_dir / tenant.tenant_id
     upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = upload_dir / file.filename
+    file_path = upload_dir / safe_name
 
     with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(file_bytes)
 
     # Create document record
     doc = Document(
         tenant_id=tenant.tenant_id,
-        filename=file.filename,
+        filename=safe_name,
         file_type=suffix.lstrip("."),
         file_size=file_path.stat().st_size,
         doc_type=doc_type,
@@ -83,7 +111,7 @@ async def upload_document(
         action="upload_document",
         resource_type="document",
         resource_id=doc.id,
-        details={"filename": file.filename, "doc_type": doc_type, "status": doc.status},
+        details={"filename": safe_name, "doc_type": doc_type, "status": doc.status},
     )
 
     return APIResponse(
@@ -141,7 +169,7 @@ async def get_document(
 async def delete_document(
     document_id: str,
     db: AsyncSession = Depends(get_db),
-    tenant: TenantContext = Depends(get_tenant_context),
+    tenant: TenantContext = require_role("admin"),
     audit: AuditService = Depends(get_audit_service),
 ) -> APIResponse[dict]:
     """Delete a document and its uploaded file."""
@@ -182,6 +210,8 @@ async def delete_document(
 async def list_documents(
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
+    page: int | None = Query(None, ge=1, description="Page number (1-based). Omit for all results."),
+    page_size: int | None = Query(None, ge=1, le=200, description="Items per page. Omit for all results."),
 ) -> APIResponse[list[DocumentUploadResponse]]:
     """List all documents for the current tenant."""
     stmt = (
@@ -189,6 +219,8 @@ async def list_documents(
         .where(Document.tenant_id == tenant.tenant_id)
         .order_by(Document.created_at.desc())
     )
+    if page is not None and page_size is not None:
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
     docs = result.scalars().all()
 

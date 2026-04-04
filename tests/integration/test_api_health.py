@@ -100,7 +100,16 @@ class TestSimulationStream:
         db_session.add(config)
         await db_session.flush()
 
-        response = await client.get(f"/api/v1/simulations/{config.id}/stream")
+        # Create a simulation via POST first, then stream by simulation ID
+        run_resp = await client.post(
+            "/api/v1/simulations/run",
+            json={"configuration_id": config.id, "test_type": "smoke"},
+        )
+        assert run_resp.status_code == 200
+        simulation_id = run_resp.json()["data"]["id"]
+
+        # Stream the completed simulation — should replay stored results
+        response = await client.get(f"/api/v1/simulations/{simulation_id}/stream")
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
 
@@ -122,6 +131,53 @@ class TestSimulationStream:
         step_data = json.loads(events[0].removeprefix("data: "))
         assert "step_name" in step_data
         assert "status" in step_data
+
+    @pytest.mark.asyncio
+    async def test_stream_fresh_simulation(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Stream endpoint runs simulation fresh when status is not completed."""
+        from finspark.models.simulation import Simulation
+
+        adapter = Adapter(name="Fresh Test Adapter", category="bureau")
+        db_session.add(adapter)
+        await db_session.flush()
+
+        adapter_version = AdapterVersion(adapter_id=adapter.id, version="v1", auth_type="api_key")
+        db_session.add(adapter_version)
+        await db_session.flush()
+
+        full_config = {
+            "adapter_name": "test",
+            "version": "v1",
+            "base_url": "https://api.test.com",
+            "auth": {"type": "api_key"},
+            "endpoints": [],
+            "field_mappings": [],
+        }
+        config = Configuration(
+            name="Fresh Test Config",
+            adapter_version_id=adapter_version.id,
+            tenant_id="test-tenant",
+            full_config=json.dumps(full_config),
+        )
+        db_session.add(config)
+        await db_session.flush()
+
+        sim = Simulation(
+            tenant_id="test-tenant",
+            configuration_id=config.id,
+            status="pending",
+            test_type="smoke",
+        )
+        db_session.add(sim)
+        await db_session.flush()
+
+        response = await client.get(f"/api/v1/simulations/{sim.id}/stream")
+        assert response.status_code == 200
+        body = response.text
+        assert "event: step" in body
+        assert "event: done" in body
 
     @pytest.mark.asyncio
     async def test_stream_simulation_not_found(self, client: AsyncClient) -> None:

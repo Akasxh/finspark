@@ -1,8 +1,9 @@
 """Integration simulation framework - mock testing of configurations."""
 
+import asyncio
 import json
 import time
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
 from finspark.schemas.simulations import SimulationStepResult
@@ -163,6 +164,51 @@ class IntegrationSimulator:
         if test_type == "full":
             yield self._test_error_handling(config)
             yield self._test_retry_logic(config)
+
+    async def run_simulation_stream_async(
+        self,
+        config: dict[str, Any],
+        test_type: str = "full",
+        step_timeout_seconds: int = 30,
+    ) -> AsyncGenerator[SimulationStepResult, None]:
+        """Yield simulation steps asynchronously, applying a per-step timeout."""
+        step_fns = [
+            lambda: self._test_config_structure(config),
+            lambda: self._test_field_mappings(config),
+            *[
+                (lambda ep: lambda: self._test_endpoint(ep, config))(endpoint)
+                for endpoint in config.get("endpoints", [])
+                if endpoint.get("enabled", True)
+            ],
+            lambda: self._test_auth_config(config),
+            lambda: self._test_hooks(config),
+        ]
+        if test_type == "full":
+            step_fns += [
+                lambda: self._test_error_handling(config),
+                lambda: self._test_retry_logic(config),
+            ]
+
+        for step_fn in step_fns:
+            result = await self._execute_step_with_timeout(step_fn, step_timeout_seconds)
+            yield result
+
+    @staticmethod
+    async def _execute_step_with_timeout(
+        step_fn: Any, timeout_seconds: int = 30
+    ) -> SimulationStepResult:
+        """Run a synchronous step function with a timeout."""
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(step_fn),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            return SimulationStepResult(
+                step_name="unknown_step",
+                status="error",
+                error_message=f"Step timed out after {timeout_seconds}s",
+            )
 
     def run_parallel_version_test(
         self,
@@ -381,7 +427,7 @@ class IntegrationSimulator:
         has_status_codes = bool(retry.get("retry_on_status"))
         duration = int((time.monotonic() - start) * 1000)
 
-        valid = max_retries > 0 and max_retries <= 5 and has_backoff
+        valid = max_retries > 0 and max_retries <= 10 and has_backoff
 
         return SimulationStepResult(
             step_name="retry_logic_validation",

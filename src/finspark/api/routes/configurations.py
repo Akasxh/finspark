@@ -19,6 +19,7 @@ from finspark.api.dependencies import (
     get_rollback_manager,
     get_simulator,
     get_tenant_context,
+    require_role,
 )
 from finspark.core.audit import AuditService
 from finspark.core.config import settings
@@ -35,6 +36,7 @@ from finspark.schemas.configurations import (
     ConfigHistoryEntry,
     ConfigSummaryResponse,
     ConfigTemplateResponse,
+    ConfigurationPartialUpdate,
     ConfigurationResponse,
     ConfigValidationResult,
     FieldMapping,
@@ -294,7 +296,7 @@ async def rollback_configuration(
     config_id: str,
     body: RollbackRequest,
     db: AsyncSession = Depends(get_db),
-    tenant: TenantContext = Depends(get_tenant_context),
+    tenant: TenantContext = require_role("admin"),
     rollback_mgr: RollbackManager = Depends(get_rollback_manager),
     audit: AuditService = Depends(get_audit_service),
 ) -> APIResponse[RollbackResponse]:
@@ -466,7 +468,7 @@ def _augment_with_rule_based(
 async def generate_configuration(
     request: GenerateConfigRequest,
     db: AsyncSession = Depends(get_db),
-    tenant: TenantContext = Depends(get_tenant_context),
+    tenant: TenantContext = require_role("admin", "editor"),
     generator: ConfigGenerator = Depends(get_config_generator),
     audit: AuditService = Depends(get_audit_service),
 ) -> APIResponse[ConfigurationResponse]:
@@ -648,6 +650,61 @@ async def get_configuration(
     )
 
 
+def _serialize_config(config: Configuration) -> ConfigurationResponse:
+    """Serialize a Configuration ORM object to a ConfigurationResponse."""
+    field_mappings = json.loads(config.field_mappings) if config.field_mappings else []
+    return ConfigurationResponse(
+        id=config.id,
+        name=config.name,
+        adapter_version_id=config.adapter_version_id,
+        document_id=config.document_id,
+        status=config.status,
+        version=config.version,
+        field_mappings=[FieldMapping(**m) for m in field_mappings],
+        created_at=config.created_at,
+        updated_at=config.updated_at,
+    )
+
+
+@router.patch("/{config_id}", response_model=APIResponse[ConfigurationResponse])
+async def update_configuration(
+    config_id: str,
+    body: ConfigurationPartialUpdate,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = require_role("admin", "editor"),
+    audit: AuditService = Depends(get_audit_service),
+) -> APIResponse[ConfigurationResponse]:
+    """Partially update a configuration (name, field_mappings, notes)."""
+    stmt = select(Configuration).where(
+        Configuration.id == config_id,
+        Configuration.tenant_id == tenant.tenant_id,
+    )
+    result = await db.execute(stmt)
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuration not found")
+
+    if body.name is not None:
+        config.name = body.name
+    if body.field_mappings is not None:
+        config.field_mappings = json.dumps([fm.model_dump() for fm in body.field_mappings])
+    if body.notes is not None:
+        config.notes = body.notes
+
+    await db.flush()
+    await db.refresh(config)
+    await audit.log(
+        tenant_id=tenant.tenant_id,
+        actor=tenant.tenant_name,
+        action="update",
+        resource_type="configuration",
+        resource_id=config_id,
+        details={"updated_fields": [k for k, v in body.model_dump().items() if v is not None]},
+    )
+
+    return APIResponse(success=True, data=_serialize_config(config), message="Configuration updated")
+
+
 @router.post("/{config_id}/validate", response_model=APIResponse[ConfigValidationResult])
 async def validate_configuration(
     config_id: str,
@@ -709,7 +766,7 @@ async def transition_configuration(
     config_id: str,
     body: TransitionRequest,
     db: AsyncSession = Depends(get_db),
-    tenant: TenantContext = Depends(get_tenant_context),
+    tenant: TenantContext = require_role("admin", "editor"),
     audit: AuditService = Depends(get_audit_service),
 ) -> APIResponse[TransitionResponse]:
     """Transition a configuration to a new lifecycle state."""
@@ -810,6 +867,8 @@ async def compare_configurations(
 async def list_configurations(
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
+    page: int | None = Query(None, ge=1, description="Page number (1-based). Omit for all results."),
+    page_size: int | None = Query(None, ge=1, le=200, description="Items per page. Omit for all results."),
 ) -> APIResponse[list[ConfigurationResponse]]:
     """List all configurations for the current tenant."""
     stmt = (
@@ -817,6 +876,8 @@ async def list_configurations(
         .where(Configuration.tenant_id == tenant.tenant_id)
         .order_by(Configuration.created_at.desc())
     )
+    if page is not None and page_size is not None:
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
     configs = result.scalars().all()
 

@@ -1,7 +1,7 @@
 import { adaptersApi } from "@/lib/api";
 import type { Adapter, AdapterVersion } from "@/types";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, GitBranch, Globe, Plug, RefreshCw, Shield, X, Zap } from "lucide-react";
+import { AlertTriangle, ChevronDown, GitBranch, Globe, Plug, RefreshCw, Shield, X, Zap } from "lucide-react";
 import { useState } from "react";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -156,9 +156,17 @@ function SkeletonCard() {
 
 // ── Version panel ──────────────────────────────────────────────────────────
 
-function VersionPanel({ version }: { version: AdapterVersion }) {
+function VersionPanel({ version, adapterId }: { version: AdapterVersion; adapterId: string }) {
   const [open, setOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const statusCls = version.status === "active" ? "badge-green" : "badge-gray";
+
+  const { data: deprData } = useQuery({
+    queryKey: ["adapter-deprecation", adapterId, version.version],
+    queryFn: () => adaptersApi.deprecation(adapterId, version.version),
+    enabled: version.status === "deprecated",
+    staleTime: 5 * 60 * 1000,
+  });
 
   return (
     <div
@@ -244,8 +252,132 @@ function VersionPanel({ version }: { version: AdapterVersion }) {
             borderTop: "1px solid var(--color-border)",
             background: "rgba(15,23,36,0.6)",
             padding: "0.75rem 1rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.75rem",
           }}
         >
+          {/* Deprecation warning banner */}
+          {deprData?.data && deprData.data.status === "deprecated" && (
+            <div
+              role="alert"
+              style={{
+                padding: "0.625rem 0.875rem",
+                borderRadius: "0.375rem",
+                border: "1px solid rgba(245,158,11,0.3)",
+                background: "rgba(245,158,11,0.08)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.375rem",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <AlertTriangle size={13} style={{ color: "#f59e0b", flexShrink: 0 }} />
+                <span style={{ fontSize: "0.75rem", fontWeight: 600, color: "#fbbf24" }}>
+                  Deprecated
+                  {deprData.data.sunset_date &&
+                    ` — sunset ${deprData.data.sunset_date}${
+                      deprData.data.days_until_sunset != null
+                        ? ` (${deprData.data.days_until_sunset} days remaining)`
+                        : ""
+                    }`}
+                </span>
+              </div>
+              {deprData.data.replacement_version && (
+                <span
+                  style={{
+                    fontSize: "0.6875rem",
+                    color: "var(--color-text-muted)",
+                    paddingLeft: "1.375rem",
+                  }}
+                >
+                  Replacement:{" "}
+                  <span
+                    className="mono"
+                    style={{ color: "var(--color-brand-light)", fontWeight: 600 }}
+                  >
+                    v{deprData.data.replacement_version}
+                  </span>
+                </span>
+              )}
+              {deprData.data.migration_guide.length > 0 && (
+                <div style={{ paddingLeft: "1.375rem" }}>
+                  <button
+                    type="button"
+                    onClick={() => setGuideOpen((g) => !g)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.25rem",
+                      fontSize: "0.6875rem",
+                      color: "#f59e0b",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 0,
+                      fontWeight: 500,
+                    }}
+                  >
+                    <ChevronDown
+                      size={11}
+                      style={{
+                        transform: guideOpen ? "rotate(180deg)" : "rotate(0deg)",
+                        transition: "transform 120ms ease",
+                      }}
+                    />
+                    Migration Guide ({deprData.data.migration_guide.length} step
+                    {deprData.data.migration_guide.length !== 1 ? "s" : ""})
+                  </button>
+                  {guideOpen && (
+                    <div
+                      style={{
+                        marginTop: "0.375rem",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.25rem",
+                      }}
+                    >
+                      {deprData.data.migration_guide.map((step, i) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: ordered migration steps
+                        <div
+                          key={i}
+                          style={{
+                            fontSize: "0.6875rem",
+                            color: "var(--color-text-secondary)",
+                            display: "flex",
+                            gap: "0.375rem",
+                          }}
+                        >
+                          <span
+                            style={{
+                              color: "#f59e0b",
+                              fontWeight: 600,
+                              flexShrink: 0,
+                              minWidth: "0.75rem",
+                            }}
+                          >
+                            {i + 1}.
+                          </span>
+                          <span>
+                            <span style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
+                              {step.action}
+                            </span>
+                            {step.description && (
+                              <span style={{ color: "var(--color-text-muted)" }}>
+                                {" — "}
+                                {step.description}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {version.endpoints.length === 0 ? (
             <p style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
               No endpoints defined.
@@ -489,7 +621,7 @@ function AdapterModal({ adapter, onClose }: { adapter: Adapter; onClose: () => v
             {adapter.versions.length > 0 ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                 {adapter.versions.map((v) => (
-                  <VersionPanel key={v.id} version={v} />
+                  <VersionPanel key={v.id} version={v} adapterId={adapter.id} />
                 ))}
               </div>
             ) : (

@@ -1,5 +1,7 @@
 """Integration tests for webhook management endpoints."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from httpx import AsyncClient
 
@@ -68,7 +70,17 @@ class TestWebhookCRUD:
         )
         webhook_id = create_resp.json()["data"]["id"]
 
-        test_resp = await client.post(f"/api/v1/webhooks/{webhook_id}/test")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+
+        with patch("finspark.api.routes.webhooks.httpx.AsyncClient") as mock_cls:
+            mock_http = AsyncMock()
+            mock_http.post = AsyncMock(return_value=mock_resp)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_http)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            test_resp = await client.post(f"/api/v1/webhooks/{webhook_id}/test")
+
         assert test_resp.status_code == 200
         data = test_resp.json()
         assert data["success"] is True

@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -39,6 +40,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     await _seed_adapters()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
+
+    from finspark.core import events
+    from finspark.services.webhook_delivery import deliver_event
+
+    for event_type in [
+        events.CONFIG_CREATED,
+        events.CONFIG_UPDATED,
+        events.CONFIG_DEPLOYED,
+        events.CONFIG_ROLLED_BACK,
+        events.SIMULATION_COMPLETED,
+        events.DOCUMENT_PARSED,
+    ]:
+        events.on(
+            event_type,
+            lambda data, et=event_type: asyncio.create_task(
+                deliver_event(data.get("tenant_id", "default"), et, data)
+            ),
+        )
+
     yield
 
 
@@ -58,10 +78,10 @@ app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(TenantMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000"] if settings.debug else [],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Tenant-ID", "X-Tenant-Name", "X-Tenant-Role"],
 )
 
 # Routes
@@ -79,7 +99,7 @@ app.include_router(analytics.router)
 @app.get("/metrics")
 async def get_metrics() -> dict:
     """Return in-memory API metrics."""
-    return metrics.snapshot()
+    return await metrics.snapshot()
 
 
 async def _seed_adapters() -> None:

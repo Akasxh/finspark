@@ -73,7 +73,7 @@ class RollbackManager:
         changed_by: str | None = None,
     ) -> Configuration:
         """Restore a configuration to a specific historical version."""
-        config = await self._get_config(config_id, tenant_id)
+        config = await self._get_config(config_id, tenant_id, for_update=True)
 
         # Fetch the target history entry
         target_stmt = select(ConfigurationHistory).where(
@@ -89,17 +89,24 @@ class RollbackManager:
         if not target_entry.new_value:
             raise ValueError(f"Version {target_version} has no saved state to restore")
 
-        snapshot_data: dict[str, Any] = json.loads(target_entry.new_value)
+        try:
+            snapshot_data: dict[str, Any] = json.loads(target_entry.new_value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Version {target_version} has corrupt state data: {exc}"
+            ) from exc
 
-        # Save current state as a snapshot before overwriting
-        await self.snapshot(
+        # Save current state as a snapshot before overwriting.
+        # snapshot() assigns the next available version number — the rollback
+        # history entry must follow it with snapshot_version + 1 to avoid
+        # duplicate version numbers.
+        pre_rollback_snapshot = await self.snapshot(
             config_id,
             tenant_id,
             change_type="pre_rollback",
             changed_by=changed_by,
         )
-
-        previous_version = config.version
+        rollback_version = pre_rollback_snapshot.version + 1
 
         # Apply restored state
         config.field_mappings = json.dumps(snapshot_data.get("field_mappings"))
@@ -112,13 +119,13 @@ class RollbackManager:
         )
         config.full_config = json.dumps(snapshot_data.get("full_config"))
         config.status = "rollback"
-        config.version = previous_version + 1
+        config.version = rollback_version
 
         # Record rollback in history
         rollback_history = ConfigurationHistory(
             tenant_id=tenant_id,
             configuration_id=config_id,
-            version=config.version,
+            version=rollback_version,
             change_type="rollback",
             previous_value=None,
             new_value=json.dumps(self._serialise_config(config)),
@@ -146,19 +153,29 @@ class RollbackManager:
         result = await self._db.execute(stmt)
         rows = result.scalars().all()
 
-        return [
-            ConfigHistoryEntry(
-                id=row.id,
-                configuration_id=row.configuration_id,
-                version=row.version,
-                change_type=row.change_type,
-                previous_value=json.loads(row.previous_value) if row.previous_value else None,
-                new_value=json.loads(row.new_value) if row.new_value else None,
-                changed_by=row.changed_by,
-                created_at=row.created_at,
+        entries: list[ConfigHistoryEntry] = []
+        for row in rows:
+            try:
+                previous_value = json.loads(row.previous_value) if row.previous_value else None
+            except json.JSONDecodeError:
+                previous_value = None
+            try:
+                new_value = json.loads(row.new_value) if row.new_value else None
+            except json.JSONDecodeError:
+                new_value = None
+            entries.append(
+                ConfigHistoryEntry(
+                    id=row.id,
+                    configuration_id=row.configuration_id,
+                    version=row.version,
+                    change_type=row.change_type,
+                    previous_value=previous_value,
+                    new_value=new_value,
+                    changed_by=row.changed_by,
+                    created_at=row.created_at,
+                )
             )
-            for row in rows
-        ]
+        return entries
 
     async def compare_versions(
         self,
@@ -181,12 +198,22 @@ class RollbackManager:
         if version_b not in entries:
             raise ValueError(f"Version {version_b} not found for configuration {config_id}")
 
-        state_a: dict[str, Any] = (
-            json.loads(entries[version_a].new_value) if entries[version_a].new_value else {}
-        )
-        state_b: dict[str, Any] = (
-            json.loads(entries[version_b].new_value) if entries[version_b].new_value else {}
-        )
+        try:
+            state_a: dict[str, Any] = (
+                json.loads(entries[version_a].new_value) if entries[version_a].new_value else {}
+            )
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Version {version_a} has corrupt state data: {exc}"
+            ) from exc
+        try:
+            state_b: dict[str, Any] = (
+                json.loads(entries[version_b].new_value) if entries[version_b].new_value else {}
+            )
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Version {version_b} has corrupt state data: {exc}"
+            ) from exc
 
         diff_result = self._diff_engine.compare(
             state_a,
@@ -208,11 +235,19 @@ class RollbackManager:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _get_config(self, config_id: str, tenant_id: str) -> Configuration:
+    async def _get_config(
+        self,
+        config_id: str,
+        tenant_id: str,
+        *,
+        for_update: bool = False,
+    ) -> Configuration:
         stmt = select(Configuration).where(
             Configuration.id == config_id,
             Configuration.tenant_id == tenant_id,
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         result = await self._db.execute(stmt)
         config = result.scalar_one_or_none()
         if not config:
@@ -220,15 +255,23 @@ class RollbackManager:
         return config
 
     @staticmethod
+    def _safe_json_loads(value: str | None) -> Any:
+        if not value:
+            return None
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+
+    @staticmethod
     def _serialise_config(config: Configuration) -> dict[str, Any]:
+        _load = RollbackManager._safe_json_loads
         return {
-            "field_mappings": json.loads(config.field_mappings) if config.field_mappings else None,
-            "transformation_rules": json.loads(config.transformation_rules)
-            if config.transformation_rules
-            else None,
-            "hooks": json.loads(config.hooks) if config.hooks else None,
-            "auth_config": json.loads(config.auth_config) if config.auth_config else None,
-            "full_config": json.loads(config.full_config) if config.full_config else None,
+            "field_mappings": _load(config.field_mappings),
+            "transformation_rules": _load(config.transformation_rules),
+            "hooks": _load(config.hooks),
+            "auth_config": _load(config.auth_config),
+            "full_config": _load(config.full_config),
             "status": config.status,
             "version": config.version,
         }

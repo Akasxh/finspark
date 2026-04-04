@@ -3,8 +3,8 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.api.dependencies import get_tenant_context
@@ -23,8 +23,8 @@ async def query_audit_logs(
     resource_type: str | None = None,
     resource_id: str | None = None,
     action: str | None = None,
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> APIResponse[PaginatedResponse[AuditLogResponse]]:
@@ -39,8 +39,8 @@ async def query_audit_logs(
         filters.append(AuditLog.action == action)
 
     # Count applies all active filters so pagination metadata is accurate
-    count_result = await db.execute(select(AuditLog.id).where(*filters))
-    total = len(count_result.all())
+    count_stmt = select(func.count()).select_from(AuditLog).where(*filters)
+    total = (await db.execute(count_stmt)).scalar() or 0
 
     # Paginated data uses the same filters
     stmt = (

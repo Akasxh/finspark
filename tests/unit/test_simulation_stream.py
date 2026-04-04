@@ -155,6 +155,7 @@ class TestStreamEndpointLooksUpSimulationFirst:
         simulation.id = "sim-abc"
         simulation.configuration_id = "cfg-xyz"
         simulation.tenant_id = "test-tenant"
+        simulation.status = "pending"
 
         config = MagicMock(spec=Configuration)
         config.id = "cfg-xyz"
@@ -173,7 +174,11 @@ class TestStreamEndpointLooksUpSimulationFirst:
             confidence_score=0.9,
         )
         simulator = MagicMock()
-        simulator.run_simulation_stream.return_value = iter([step1])
+
+        async def fake_stream(config, test_type=None):
+            yield step1
+
+        simulator.run_simulation_stream_async = fake_stream
 
         response = await stream_simulation(
             simulation_id="sim-abc",
@@ -204,6 +209,7 @@ class TestStreamEndpointLooksUpSimulationFirst:
         simulation.id = "sim-err"
         simulation.configuration_id = "cfg-err"
         simulation.tenant_id = "test-tenant"
+        simulation.status = "pending"
 
         config = MagicMock(spec=Configuration)
         config.id = "cfg-err"
@@ -213,7 +219,10 @@ class TestStreamEndpointLooksUpSimulationFirst:
         tenant = TenantContext(tenant_id="test-tenant", tenant_name="Test", tenant_role="admin")
 
         simulator = MagicMock()
-        simulator.run_simulation_stream.side_effect = RuntimeError("stream exploded")
+        async def failing_stream(config, test_type=None):
+            raise RuntimeError("stream exploded")
+            yield  # make it an async generator
+        simulator.run_simulation_stream_async = failing_stream
 
         response = await stream_simulation(
             simulation_id="sim-err",

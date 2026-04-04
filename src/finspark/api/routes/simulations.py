@@ -1,6 +1,5 @@
 """Simulation and testing routes."""
 
-import asyncio
 import json
 from collections.abc import AsyncGenerator
 
@@ -9,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from finspark.api.dependencies import get_audit_service, get_simulator, get_tenant_context
+from finspark.api.dependencies import get_audit_service, get_simulator, get_tenant_context, require_role
 from finspark.core.audit import AuditService
 from finspark.core.database import get_db
 from finspark.models.configuration import Configuration
@@ -25,11 +24,44 @@ from finspark.services.simulation.simulator import IntegrationSimulator
 router = APIRouter(prefix="/simulations", tags=["Simulations"])
 
 
+@router.get("/", response_model=APIResponse[list[SimulationResponse]])
+async def list_simulations(
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+) -> APIResponse[list[SimulationResponse]]:
+    """List simulations for the current tenant (most recent first, limit 50)."""
+    stmt = (
+        select(Simulation)
+        .where(Simulation.tenant_id == tenant.tenant_id)
+        .order_by(Simulation.created_at.desc())
+        .limit(50)
+    )
+    result = await db.execute(stmt)
+    sims = result.scalars().all()
+
+    data = [
+        SimulationResponse(
+            id=sim.id,
+            configuration_id=sim.configuration_id,
+            status=sim.status,
+            test_type=sim.test_type,
+            total_tests=sim.total_tests,
+            passed_tests=sim.passed_tests,
+            failed_tests=sim.failed_tests,
+            duration_ms=sim.duration_ms,
+            steps=[],
+            created_at=sim.created_at,
+        )
+        for sim in sims
+    ]
+    return APIResponse(success=True, data=data, message="")
+
+
 @router.post("/run", response_model=APIResponse[SimulationResponse])
 async def run_simulation(
     request: RunSimulationRequest,
     db: AsyncSession = Depends(get_db),
-    tenant: TenantContext = Depends(get_tenant_context),
+    tenant: TenantContext = require_role("admin", "editor"),
     simulator: IntegrationSimulator = Depends(get_simulator),
     audit: AuditService = Depends(get_audit_service),
 ) -> APIResponse[SimulationResponse]:
@@ -158,6 +190,21 @@ async def get_simulation(
     )
 
 
+def _serialize_step(step: SimulationStep) -> dict:
+    """Serialize a SimulationStep ORM row to a dict matching SimulationStepResult."""
+    return {
+        "step_name": step.step_name,
+        "status": step.status,
+        "request_payload": json.loads(step.request_payload or "{}"),
+        "expected_response": json.loads(step.expected_response or "{}"),
+        "actual_response": json.loads(step.actual_response or "{}"),
+        "duration_ms": step.duration_ms or 0,
+        "confidence_score": step.confidence_score or 0.0,
+        "error_message": step.error_message,
+        "assertions": [],
+    }
+
+
 @router.get("/{simulation_id}/stream")
 async def stream_simulation(
     simulation_id: str,
@@ -165,8 +212,11 @@ async def stream_simulation(
     tenant: TenantContext = Depends(get_tenant_context),
     simulator: IntegrationSimulator = Depends(get_simulator),
 ) -> StreamingResponse:
-    """Stream simulation step results as Server-Sent Events."""
-    # Look up the Simulation record first
+    """Stream simulation step results as Server-Sent Events.
+
+    Replays stored steps from DB if the simulation is already complete.
+    Otherwise runs the simulation fresh with per-step timeout, then persists results.
+    """
     sim_stmt = select(Simulation).where(
         Simulation.id == simulation_id,
         Simulation.tenant_id == tenant.tenant_id,
@@ -176,7 +226,28 @@ async def stream_simulation(
     if not simulation:
         raise HTTPException(status_code=404, detail="Simulation not found")
 
-    # Fetch the Configuration via the simulation's configuration_id
+    # If already complete, replay stored steps from DB
+    if simulation.status in ("passed", "failed"):
+        steps_stmt = (
+            select(SimulationStep)
+            .where(SimulationStep.simulation_id == simulation.id)
+            .order_by(SimulationStep.step_order)
+        )
+        steps_result = await db.execute(steps_stmt)
+        stored_steps = list(steps_result.scalars().all())
+
+        async def replay_generator() -> AsyncGenerator[str, None]:
+            for step in stored_steps:
+                yield f"event: step\ndata: {json.dumps(_serialize_step(step))}\n\n"
+            yield f'event: done\ndata: {{"total_steps": {len(stored_steps)}}}\n\n'
+
+        return StreamingResponse(
+            replay_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # Run fresh — fetch configuration first
     cfg_stmt = select(Configuration).where(
         Configuration.id == simulation.configuration_id,
         Configuration.tenant_id == tenant.tenant_id,
@@ -187,25 +258,58 @@ async def stream_simulation(
         raise HTTPException(status_code=404, detail="Configuration not found")
 
     full_config = json.loads(config.full_config)
+    test_type = simulation.test_type
+    sim_id = simulation.id
 
-    async def event_generator() -> AsyncGenerator[str, None]:
+    async def run_and_stream() -> AsyncGenerator[str, None]:
         step_index = 0
+        collected: list[SimulationStepResult] = []
         try:
-            # run_simulation_stream is a sync generator; run it off the event loop thread
-            steps = await asyncio.to_thread(
-                lambda: list(simulator.run_simulation_stream(full_config))
-            )
-            for step in steps:
-                data = json.dumps(step.model_dump())
-                yield f"event: step\ndata: {data}\n\n"
+            async for step in simulator.run_simulation_stream_async(
+                full_config, test_type=test_type
+            ):
+                collected.append(step)
+                yield f"event: step\ndata: {json.dumps(step.model_dump())}\n\n"
                 step_index += 1
-            yield f'event: done\ndata: {{"total_steps": {step_index}}}\n\n'
         except Exception as exc:
             error_data = json.dumps({"message": str(exc), "steps_completed": step_index})
             yield f"event: error\ndata: {error_data}\n\n"
+            return
+
+        # Persist results to DB
+        total = len(collected)
+        passed_count = sum(1 for s in collected if s.status == "passed")
+        failed_count = total - passed_count
+        total_duration = sum(s.duration_ms for s in collected)
+
+        simulation.status = "passed" if failed_count == 0 else "failed"
+        simulation.total_tests = total
+        simulation.passed_tests = passed_count
+        simulation.failed_tests = failed_count
+        simulation.duration_ms = total_duration
+        simulation.results = json.dumps([s.model_dump() for s in collected])
+
+        for i, step in enumerate(collected):
+            sim_step = SimulationStep(
+                simulation_id=sim_id,
+                step_name=step.step_name,
+                step_order=i,
+                status=step.status,
+                request_payload=json.dumps(step.request_payload),
+                expected_response=json.dumps(step.expected_response),
+                actual_response=json.dumps(step.actual_response),
+                duration_ms=step.duration_ms,
+                confidence_score=step.confidence_score,
+                error_message=step.error_message,
+            )
+            db.add(sim_step)
+
+        await db.flush()
+
+        yield f'event: done\ndata: {{"total_steps": {step_index}}}\n\n'
 
     return StreamingResponse(
-        event_generator(),
+        run_and_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

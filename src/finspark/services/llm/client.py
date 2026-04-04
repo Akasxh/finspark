@@ -41,6 +41,14 @@ class GeminiClient:
                 "Set FINSPARK_GEMINI_API_KEY in .env or pass api_key explicitly."
             )
 
+        self._client = httpx.AsyncClient(
+            timeout=self.timeout,
+            headers={
+                "x-goog-api-key": self.api_key,
+                "Content-Type": "application/json",
+            },
+        )
+
     async def generate(
         self,
         prompt: str,
@@ -67,8 +75,14 @@ class GeminiClient:
         if response_json:
             body["generationConfig"]["responseMimeType"] = "application/json"
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(url, params={"key": self.api_key}, json=body)
+        try:
+            resp = await self._client.post(url, json=body)
+        except httpx.TimeoutException as exc:
+            logger.error("gemini_timeout url=%s", url)
+            raise GeminiAPIError("Gemini API request timed out") from exc
+        except httpx.NetworkError as exc:
+            logger.error("gemini_network_error url=%s error=%s", url, exc)
+            raise GeminiAPIError(f"Network error communicating with Gemini: {exc}") from exc
 
         if resp.status_code != 200:
             logger.error("gemini_api_error status=%s body=%s", resp.status_code, resp.text[:500])

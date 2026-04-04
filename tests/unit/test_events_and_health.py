@@ -1,6 +1,7 @@
 """Comprehensive tests for the event system and health monitor."""
 
 import asyncio
+import time
 
 import pytest
 
@@ -42,36 +43,40 @@ class TestEventOn:
     def teardown_method(self):
         clear()
 
-    def test_on_registers_handler(self):
+    @pytest.mark.asyncio
+    async def test_on_registers_handler(self):
         called = []
         on(CONFIG_CREATED, lambda data: called.append(data))
-        emit(CONFIG_CREATED, {"id": 1})
+        await emit(CONFIG_CREATED, {"id": 1})
         assert called == [{"id": 1}]
 
-    def test_on_multiple_handlers_same_event(self):
+    @pytest.mark.asyncio
+    async def test_on_multiple_handlers_same_event(self):
         results = []
         on(CONFIG_CREATED, lambda d: results.append("h1"))
         on(CONFIG_CREATED, lambda d: results.append("h2"))
-        emit(CONFIG_CREATED, {})
+        await emit(CONFIG_CREATED, {})
         assert results == ["h1", "h2"]
 
-    def test_on_does_not_cross_contaminate_events(self):
+    @pytest.mark.asyncio
+    async def test_on_does_not_cross_contaminate_events(self):
         a_calls = []
         b_calls = []
         on(CONFIG_CREATED, lambda d: a_calls.append(d))
         on(CONFIG_UPDATED, lambda d: b_calls.append(d))
-        emit(CONFIG_CREATED, {"x": 1})
+        await emit(CONFIG_CREATED, {"x": 1})
         assert a_calls == [{"x": 1}]
         assert b_calls == []
 
-    def test_handler_receives_correct_data(self):
+    @pytest.mark.asyncio
+    async def test_handler_receives_correct_data(self):
         received = {}
 
         def capture(data):
             received.update(data)
 
         on(CONFIG_DEPLOYED, capture)
-        emit(CONFIG_DEPLOYED, {"env": "prod", "version": 42})
+        await emit(CONFIG_DEPLOYED, {"env": "prod", "version": 42})
         assert received == {"env": "prod", "version": 42}
 
 
@@ -82,11 +87,12 @@ class TestEventEmit:
     def teardown_method(self):
         clear()
 
-    def test_emit_no_handlers_does_not_error(self):
-        # Should not raise even with zero handlers registered
-        emit("nonexistent.event", {"payload": True})
+    @pytest.mark.asyncio
+    async def test_emit_no_handlers_does_not_error(self):
+        await emit("nonexistent.event", {"payload": True})
 
-    def test_emit_failing_handler_does_not_propagate(self):
+    @pytest.mark.asyncio
+    async def test_emit_failing_handler_does_not_propagate(self):
         def bad_handler(data):
             raise RuntimeError("boom")
 
@@ -94,22 +100,22 @@ class TestEventEmit:
         on(CONFIG_ROLLED_BACK, bad_handler)
         on(CONFIG_ROLLED_BACK, lambda d: good_calls.append(d))
 
-        # Must not raise
-        emit(CONFIG_ROLLED_BACK, {"reason": "test"})
-        # Good handler still runs after the bad one
+        await emit(CONFIG_ROLLED_BACK, {"reason": "test"})
         assert good_calls == [{"reason": "test"}]
 
-    def test_emit_calls_handler_with_exact_data(self):
+    @pytest.mark.asyncio
+    async def test_emit_calls_handler_with_exact_data(self):
         payloads = []
         on(SIMULATION_STARTED, lambda d: payloads.append(d))
         data = {"run_id": "abc", "steps": 10}
-        emit(SIMULATION_STARTED, data)
+        await emit(SIMULATION_STARTED, data)
         assert payloads[0] is data
 
-    def test_emit_unknown_event_does_not_affect_known_handlers(self):
+    @pytest.mark.asyncio
+    async def test_emit_unknown_event_does_not_affect_known_handlers(self):
         calls = []
         on(DOCUMENT_PARSED, lambda d: calls.append(d))
-        emit("totally.unknown", {"x": 1})
+        await emit("totally.unknown", {"x": 1})
         assert calls == []
 
 
@@ -120,21 +126,23 @@ class TestEventClear:
     def teardown_method(self):
         clear()
 
-    def test_clear_removes_all_handlers(self):
+    @pytest.mark.asyncio
+    async def test_clear_removes_all_handlers(self):
         calls = []
         on(CONFIG_CREATED, lambda d: calls.append(d))
         on(CONFIG_UPDATED, lambda d: calls.append(d))
         clear()
-        emit(CONFIG_CREATED, {})
-        emit(CONFIG_UPDATED, {})
+        await emit(CONFIG_CREATED, {})
+        await emit(CONFIG_UPDATED, {})
         assert calls == []
 
-    def test_clear_then_re_register_works(self):
+    @pytest.mark.asyncio
+    async def test_clear_then_re_register_works(self):
         calls = []
         on(ADAPTER_DEPRECATED, lambda d: calls.append("first"))
         clear()
         on(ADAPTER_DEPRECATED, lambda d: calls.append("second"))
-        emit(ADAPTER_DEPRECATED, {})
+        await emit(ADAPTER_DEPRECATED, {})
         assert calls == ["second"]
 
 
@@ -170,22 +178,24 @@ class TestMultipleHandlersSameEvent:
     def teardown_method(self):
         clear()
 
-    def test_all_handlers_invoked_in_order(self):
+    @pytest.mark.asyncio
+    async def test_all_handlers_invoked_in_order(self):
         order = []
         on(SIMULATION_COMPLETED, lambda d: order.append(1))
         on(SIMULATION_COMPLETED, lambda d: order.append(2))
         on(SIMULATION_COMPLETED, lambda d: order.append(3))
-        emit(SIMULATION_COMPLETED, {})
+        await emit(SIMULATION_COMPLETED, {})
         assert order == [1, 2, 3]
 
-    def test_handlers_for_different_events_are_independent(self):
+    @pytest.mark.asyncio
+    async def test_handlers_for_different_events_are_independent(self):
         a, b = [], []
         on(CONFIG_CREATED, lambda d: a.append("a"))
         on(CONFIG_UPDATED, lambda d: b.append("b"))
-        emit(CONFIG_CREATED, {})
+        await emit(CONFIG_CREATED, {})
         assert a == ["a"]
         assert b == []
-        emit(CONFIG_UPDATED, {})
+        await emit(CONFIG_UPDATED, {})
         assert a == ["a"]
         assert b == ["b"]
 
@@ -251,7 +261,6 @@ class TestHealthMonitorRunAllChecks:
             raise Exception("unexpected failure")
 
         m.register_check("exploding", exploding)
-        # Must not raise
         result = _run(m.run_all_checks())
         assert result["checks"]["exploding"]["status"] == "unhealthy"
         assert "unexpected failure" in result["checks"]["exploding"]["error"]
@@ -265,8 +274,6 @@ class TestHealthMonitorUptime:
         assert uptime >= 0
 
     def test_uptime_increases_over_time(self):
-        import time
-
         m = HealthMonitor()
         t1 = m.get_uptime()
         time.sleep(0.05)

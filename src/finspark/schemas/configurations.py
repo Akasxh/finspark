@@ -40,6 +40,14 @@ class HookConfig(BaseModel):
     params: dict[str, Any] = {}
 
 
+class ConfigurationPartialUpdate(BaseModel):
+    """Partial update for configuration fields."""
+
+    name: str | None = None
+    field_mappings: list[FieldMapping] | None = None
+    notes: str | None = None
+
+
 class GenerateConfigRequest(BaseModel):
     """Request to generate a configuration from a parsed document."""
 

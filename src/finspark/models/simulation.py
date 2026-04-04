@@ -11,7 +11,9 @@ class Simulation(Base, UUIDMixin, TenantMixin, TimestampMixin):
 
     __tablename__ = "simulations"
 
-    configuration_id: Mapped[str] = mapped_column(ForeignKey("configurations.id"), nullable=False)
+    configuration_id: Mapped[str] = mapped_column(
+        ForeignKey("configurations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     status: Mapped[str] = mapped_column(
         String(20), default="pending"
     )  # pending, running, passed, failed, error
@@ -31,7 +33,9 @@ class SimulationStep(Base, UUIDMixin, TimestampMixin):
 
     __tablename__ = "simulation_steps"
 
-    simulation_id: Mapped[str] = mapped_column(ForeignKey("simulations.id"), nullable=False)
+    simulation_id: Mapped[str] = mapped_column(
+        ForeignKey("simulations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     step_name: Mapped[str] = mapped_column(String(255), nullable=False)
     step_order: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="pending")

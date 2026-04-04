@@ -71,8 +71,11 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
     <>
       <tr
         onClick={() => hasDetails && setOpen((v) => !v)}
+        onKeyDown={hasDetails ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } } : undefined}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
+        role={hasDetails ? "button" : undefined}
+        tabIndex={hasDetails ? 0 : undefined}
         style={{ height: 36, borderBottom: "1px solid #1e2d47", cursor: hasDetails ? "pointer" : "default", background: open ? "rgba(29,111,164,0.06)" : hovered ? "rgba(255,255,255,0.02)" : "transparent" }}
       >
         <td style={{ padding: "0 16px", fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>

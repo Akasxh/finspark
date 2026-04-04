@@ -1,4 +1,5 @@
 import { adaptersApi, analyticsApi, configurationsApi, documentsApi } from "@/lib/api";
+import type { ConfigSummaryResponse } from "@/types";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
@@ -101,6 +102,18 @@ function buildPieData(adapters: Array<{ is_active: boolean; status?: string }>) 
     }));
 }
 
+const STATUS_COLORS: Record<string, string> = {
+  active: TEAL,
+  draft: "#fbbf24",
+  deprecated: GRAY_STATUS,
+  archived: GRAY_STATUS,
+  error: ERROR_COLOR,
+};
+
+function statusColor(s: string): string {
+  return STATUS_COLORS[s.toLowerCase()] ?? GRAY_STATUS;
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 interface KpiCardProps {
@@ -143,6 +156,94 @@ function KpiCard({ title, value, subtitle, icon: Icon, iconBg, iconColor, delay 
   );
 }
 
+function ConfigSummaryCard({ summary }: { summary: ConfigSummaryResponse }) {
+  const confidencePct = Math.round(summary.avg_confidence * 100);
+  const confidenceColor = confidencePct >= 80 ? TEAL : confidencePct >= 50 ? "#fbbf24" : ERROR_COLOR;
+
+  return (
+    <div
+      className="card animate-fade-in p-5"
+      style={{ animationDelay: "200ms", animationFillMode: "both" }}
+    >
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text-primary)" }}>
+            Configuration Summary
+          </h2>
+          <p style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "2px" }}>
+            {summary.total} total configuration{summary.total !== 1 ? "s" : ""}
+          </p>
+        </div>
+        <Settings size={16} style={{ color: "var(--color-text-muted)" }} aria-hidden />
+      </div>
+
+      <div className="flex flex-wrap items-start gap-6">
+        {/* By status */}
+        <div style={{ flex: "1 1 160px" }}>
+          <p style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            By Status
+          </p>
+          <div className="space-y-2">
+            {Object.entries(summary.by_status).map(([status, count]) => (
+              <div key={status} className="flex items-center gap-2">
+                <div
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    backgroundColor: statusColor(status),
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", textTransform: "capitalize", flex: 1 }}>
+                  {status}
+                </span>
+                <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>
+                  {count}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Avg confidence */}
+        <div style={{ flex: "2 1 200px" }}>
+          <p style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Avg. Confidence
+          </p>
+          <div className="flex items-center gap-3">
+            <div
+              style={{
+                flex: 1,
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: "var(--color-border)",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${confidencePct}%`,
+                  borderRadius: 3,
+                  backgroundColor: confidenceColor,
+                  transition: "width 0.4s ease",
+                }}
+              />
+            </div>
+            <span style={{ fontSize: "13px", fontWeight: 700, color: confidenceColor, fontVariantNumeric: "tabular-nums", minWidth: "36px" }}>
+              {confidencePct}%
+            </span>
+          </div>
+          <p style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "6px" }}>
+            across all mapped configurations
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard ──────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -155,6 +256,11 @@ export default function Dashboard() {
   const analyticsQ = useQuery({
     queryKey: ["analytics", "dashboard"],
     queryFn: () => analyticsApi.dashboard(),
+    retry: false,
+  });
+  const configSummaryQ = useQuery({
+    queryKey: ["configurations", "summary"],
+    queryFn: () => configurationsApi.getSummary(),
     retry: false,
   });
 
@@ -248,6 +354,11 @@ export default function Dashboard() {
           delay={180}
         />
       </div>
+
+      {/* Configuration Summary */}
+      {configSummaryQ.data?.data && (
+        <ConfigSummaryCard summary={configSummaryQ.data.data} />
+      )}
 
       {/* Charts row: activity + pie */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

@@ -17,7 +17,9 @@ class Adapter(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    versions: Mapped[list["AdapterVersion"]] = relationship(back_populates="adapter")
+    versions: Mapped[list["AdapterVersion"]] = relationship(
+        back_populates="adapter", cascade="all, delete-orphan"
+    )
 
 
 class AdapterVersion(Base, UUIDMixin, TimestampMixin):
@@ -25,7 +27,9 @@ class AdapterVersion(Base, UUIDMixin, TimestampMixin):
 
     __tablename__ = "adapter_versions"
 
-    adapter_id: Mapped[str] = mapped_column(ForeignKey("adapters.id"), nullable=False)
+    adapter_id: Mapped[str] = mapped_column(
+        ForeignKey("adapters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     version: Mapped[str] = mapped_column(String(20), nullable=False)  # e.g., "v1", "v2.1"
     version_order: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="active")  # active, deprecated, beta

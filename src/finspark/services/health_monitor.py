@@ -1,5 +1,6 @@
 """Health monitoring service for integration adapters."""
 
+import inspect
 import time
 from typing import Any
 
@@ -19,6 +20,8 @@ class HealthMonitor:
         for name, check in self._checks.items():
             try:
                 result = check["fn"]()
+                if inspect.isawaitable(result):
+                    result = await result
                 results[name] = {"status": "healthy", "details": result}
                 check["last_status"] = "healthy"
             except Exception as e:

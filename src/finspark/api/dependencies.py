@@ -1,6 +1,6 @@
 """FastAPI dependencies for dependency injection."""
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.core.audit import AuditService
@@ -21,6 +21,18 @@ def get_tenant_context(request: Request) -> TenantContext:
         tenant_name=getattr(request.state, "tenant_name", "Default"),
         role=getattr(request.state, "role", "viewer"),
     )
+
+
+def require_role(*allowed_roles: str) -> Depends:
+    """Dependency factory that enforces role-based access control."""
+
+    def dependency(request: Request) -> TenantContext:
+        tenant = get_tenant_context(request)
+        if tenant.role not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return tenant
+
+    return Depends(dependency)
 
 
 def get_document_parser() -> DocumentParser:

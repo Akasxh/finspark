@@ -327,6 +327,7 @@ export default function Simulations() {
     mutationFn: simulationsApi.run,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["simulations"] });
+      queryClient.invalidateQueries({ queryKey: ["configurations"] });
       setShowForm(false);
       setConfigId("");
       setRunError(null);

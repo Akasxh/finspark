@@ -31,7 +31,15 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     from finspark.models.base import Base
-    from finspark.models.webhook import Webhook, WebhookDelivery  # noqa: F401
+
+    # Import all models so SQLAlchemy registers them on Base.metadata
+    from finspark.models import adapter  # noqa: F401
+    from finspark.models import audit  # noqa: F401
+    from finspark.models import configuration  # noqa: F401
+    from finspark.models import document  # noqa: F401
+    from finspark.models import simulation  # noqa: F401
+    from finspark.models import tenant  # noqa: F401
+    from finspark.models import webhook  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

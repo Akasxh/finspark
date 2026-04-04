@@ -38,9 +38,9 @@ class DocumentParser:
         suffix = file_path.suffix.lower()
 
         if suffix == ".docx":
-            return self._parse_docx(file_path)
+            return self._parse_docx(file_path, doc_type=doc_type)
         elif suffix == ".pdf":
-            return self._parse_pdf(file_path)
+            return self._parse_pdf(file_path, doc_type=doc_type)
         elif suffix in (".yaml", ".yml"):
             return self._parse_openapi(file_path)
         elif suffix == ".json":
@@ -76,7 +76,7 @@ class DocumentParser:
             raw_entities=self._extract_all_entities(text),
         )
 
-    def _parse_docx(self, file_path: Path) -> ParsedDocumentResult:
+    def _parse_docx(self, file_path: Path, doc_type: str = "brd") -> ParsedDocumentResult:
         from docx import Document
 
         doc = Document(str(file_path))
@@ -91,9 +91,9 @@ class DocumentParser:
                 full_text_parts.append(row_text)
 
         full_text = "\n".join(full_text_parts)
-        return self.parse_text(full_text, doc_type="brd")
+        return self.parse_text(full_text, doc_type=doc_type)
 
-    def _parse_pdf(self, file_path: Path) -> ParsedDocumentResult:
+    def _parse_pdf(self, file_path: Path, doc_type: str = "brd") -> ParsedDocumentResult:
         from pypdf import PdfReader
 
         reader = PdfReader(str(file_path))
@@ -104,7 +104,7 @@ class DocumentParser:
                 text_parts.append(page_text)
 
         full_text = "\n".join(text_parts)
-        return self.parse_text(full_text, doc_type="brd")
+        return self.parse_text(full_text, doc_type=doc_type)
 
     def _parse_openapi(self, file_path: Path) -> ParsedDocumentResult:
         with open(file_path) as f:
@@ -126,6 +126,26 @@ class DocumentParser:
             summary=data.get("description", ""),
             confidence_score=0.8,
         )
+
+    @staticmethod
+    def _resolve_ref(ref: str, spec: dict[str, Any]) -> dict[str, Any]:
+        """Resolve a JSON $ref string against the spec (local refs only)."""
+        # Expected format: "#/components/schemas/FooBar"
+        if not ref.startswith("#/"):
+            return {}
+        parts = ref.lstrip("#/").split("/")
+        node: Any = spec
+        for part in parts:
+            if not isinstance(node, dict):
+                return {}
+            node = node.get(part, {})
+        return node if isinstance(node, dict) else {}
+
+    def _resolve_schema(self, schema: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]:
+        """Return the schema dict with $ref resolved, if present."""
+        if "$ref" in schema:
+            return self._resolve_ref(schema["$ref"], spec)
+        return schema
 
     def _parse_openapi_dict(self, spec: dict[str, Any]) -> ParsedDocumentResult:
         """Parse an OpenAPI specification dictionary."""
@@ -164,15 +184,17 @@ class DocumentParser:
 
                 # Extract fields from inline requestBody schema
                 req_body = details.get("requestBody", {})
-                req_schema = (
+                req_schema = self._resolve_schema(
                     req_body.get("content", {})
                     .get("application/json", {})
-                    .get("schema", {})
+                    .get("schema", {}),
+                    spec,
                 )
                 if req_schema.get("properties"):
                     section = f"{method.upper()} {path} request"
                     req_required = set(req_schema.get("required", []))
                     for fname, fdef in req_schema["properties"].items():
+                        fdef = self._resolve_schema(fdef, spec)
                         fields.append(
                             ExtractedField(
                                 name=fname,
@@ -186,16 +208,18 @@ class DocumentParser:
 
                 # Extract fields from inline response schema (200/201/202)
                 for status_code in ("200", "201", "202"):
-                    resp_schema = (
+                    resp_schema = self._resolve_schema(
                         details.get("responses", {})
                         .get(status_code, {})
                         .get("content", {})
                         .get("application/json", {})
-                        .get("schema", {})
+                        .get("schema", {}),
+                        spec,
                     )
                     if resp_schema.get("properties"):
                         section = f"{method.upper()} {path} response"
                         for fname, fdef in resp_schema["properties"].items():
+                            fdef = self._resolve_schema(fdef, spec)
                             fields.append(
                                 ExtractedField(
                                     name=fname,
@@ -396,8 +420,9 @@ class DocumentParser:
         ]
         found = []
         for pattern in security_keywords:
-            if re.search(pattern, text, re.IGNORECASE):
-                found.append(re.sub(r"[\\()]", "", pattern).replace(r"\s*", " ").strip())
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                found.append(match.group(0))
         return found
 
     def _extract_sla_requirements(self, text: str) -> dict[str, str]:
@@ -416,9 +441,17 @@ class DocumentParser:
         return sla
 
     def _extract_title(self, text: str) -> str:
+        _SEPARATOR_RE = re.compile(r"^[|\-#=~\s]+$")
         lines = text.strip().split("\n")
         for line in lines[:5]:
             line = line.strip()
+            if not line:
+                continue
+            # Skip table separators and markdown heading/rule characters
+            if line[0] in ("|", "-", "#", "=", "~"):
+                continue
+            if _SEPARATOR_RE.match(line):
+                continue
             if len(line) > 10 and len(line) < 200:
                 return line
         return "Untitled Document"

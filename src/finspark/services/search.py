@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -199,8 +199,20 @@ class IntegrationSearch:
         parsed = self._parse_query(query)
         response = SearchResponse(query=query)
 
-        # Search adapters (not tenant-scoped)
+        # Search adapters (not tenant-scoped) — include category in filter.
+        # Skip ILIKE pre-filter when auth_type signals are present: auth_type lives on
+        # AdapterVersion (a joined table) and cannot be filtered here without a subquery,
+        # so we fall back to loading all adapters and letting the scorer handle it.
+        terms = parsed.tokens
         stmt = select(Adapter).options(selectinload(Adapter.versions))
+        if terms and not parsed.auth_types:
+            term_filter = or_(
+                *[Adapter.name.ilike(f"%{term}%") for term in terms],
+                *[Adapter.description.ilike(f"%{term}%") for term in terms],
+                *[Adapter.category.ilike(f"%{term}%") for term in terms],
+            )
+            stmt = stmt.where(term_filter)
+        stmt = stmt.limit(50)
         result = await self.db.execute(stmt)
         adapters = list(result.scalars().all())
 
@@ -225,6 +237,13 @@ class IntegrationSearch:
 
         # Search configurations (tenant-scoped)
         stmt = select(Configuration).where(Configuration.tenant_id == tenant_id)
+        if terms:
+            term_filter = or_(
+                *[Configuration.name.ilike(f"%{term}%") for term in terms],
+                *[Configuration.status.ilike(f"%{term}%") for term in terms],
+            )
+            stmt = stmt.where(term_filter)
+        stmt = stmt.limit(50)
         result = await self.db.execute(stmt)
         configurations = list(result.scalars().all())
 
@@ -246,6 +265,13 @@ class IntegrationSearch:
 
         # Search simulations (tenant-scoped)
         stmt = select(Simulation).where(Simulation.tenant_id == tenant_id)
+        if terms:
+            term_filter = or_(
+                *[Simulation.status.ilike(f"%{term}%") for term in terms],
+                *[Simulation.test_type.ilike(f"%{term}%") for term in terms],
+            )
+            stmt = stmt.where(term_filter)
+        stmt = stmt.limit(50)
         result = await self.db.execute(stmt)
         simulations = list(result.scalars().all())
 
