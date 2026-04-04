@@ -174,6 +174,14 @@ export interface ConfigTemplateResponse {
   default_config: Record<string, unknown>;
 }
 
+export interface ConfigHistoryEntry {
+  version: number;
+  change_type: string;
+  changed_by: string;
+  timestamp: string;
+  snapshot?: Record<string, unknown>;
+}
+
 export interface HealthStatus {
   status: string;
   version?: string;

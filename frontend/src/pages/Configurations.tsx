@@ -1,6 +1,12 @@
 import { useToast } from "@/components/Toast";
 import { adaptersApi, configurationsApi, documentsApi } from "@/lib/api";
-import type { Adapter, ConfigValidationResult, Configuration } from "@/types";
+import type {
+  Adapter,
+  ConfigHistoryEntry,
+  ConfigValidationResult,
+  Configuration,
+  FieldMapping,
+} from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
@@ -10,9 +16,13 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Download,
+  History,
   PlayCircle,
   Plus,
   Rocket,
+  RotateCcw,
+  Save,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -39,11 +49,34 @@ const TRANSITION_BUTTONS: Record<
 
 const STATUS_STEPS = ["draft", "configured", "testing", "active"];
 
+const TRANSFORM_OPTIONS = [
+  "none",
+  "upper",
+  "lower",
+  "parse_number",
+  "parse_date",
+  "normalize_phone",
+  "validate_email",
+  "to_string",
+  "format_date",
+  "parse_boolean",
+];
+
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+function formatDateTime(dateStr: string): string {
+  return new Date(dateStr).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
@@ -201,8 +234,204 @@ function ValidationPanel({ configId }: { configId: string }) {
   );
 }
 
+function HistoryPanel({ configId, currentVersion }: { configId: string; currentVersion: number }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["config-history", configId],
+    queryFn: () => configurationsApi.history(configId),
+  });
+
+  const rollbackMutation = useMutation({
+    mutationFn: (targetVersion: number) => configurationsApi.rollback(configId, targetVersion),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["configurations"] });
+      queryClient.invalidateQueries({ queryKey: ["config-history", configId] });
+      toast("Rolled back successfully.", "success");
+    },
+    onError: () => {
+      toast("Rollback failed.", "error");
+    },
+  });
+
+  const handleRollback = (entry: ConfigHistoryEntry) => {
+    if (
+      window.confirm(
+        `Roll back to version ${entry.version}? This will create a new version from that snapshot.`
+      )
+    ) {
+      rollbackMutation.mutate(entry.version);
+    }
+  };
+
+  if (isLoading) {
+    return <p className="text-xs text-gray-500 py-2">Loading history...</p>;
+  }
+
+  if (isError) {
+    return <p className="text-xs text-red-400 py-2">Failed to load history.</p>;
+  }
+
+  const entries: ConfigHistoryEntry[] = data?.data ?? [];
+
+  if (entries.length === 0) {
+    return <p className="text-xs text-gray-500 py-2">No history available.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {entries.map((entry) => (
+        <div
+          key={entry.version}
+          className="flex items-center gap-3 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2"
+        >
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-semibold text-indigo-400">
+            v{entry.version}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-gray-300 capitalize">
+              {entry.change_type.replace(/_/g, " ")}
+            </p>
+            <p className="text-xs text-gray-500">
+              {entry.changed_by} &middot; {formatDateTime(entry.timestamp)}
+            </p>
+          </div>
+          {entry.version !== currentVersion && (
+            <button
+              type="button"
+              className="btn-secondary text-xs py-1 px-2"
+              disabled={rollbackMutation.isPending}
+              onClick={() => handleRollback(entry)}
+            >
+              <RotateCcw className="h-3 w-3" />
+              Rollback
+            </button>
+          )}
+          {entry.version === currentVersion && (
+            <span className="text-xs text-emerald-400 font-medium">current</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EditableFieldMappings({ cfg }: { cfg: Configuration }) {
+  const { toast } = useToast();
+  const [mappings, setMappings] = useState<FieldMapping[]>(() =>
+    cfg.field_mappings.map((fm) => ({ ...fm }))
+  );
+  const [isDirty, setIsDirty] = useState(false);
+
+  const updateTarget = (idx: number, value: string) => {
+    setMappings((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], target_field: value };
+      return next;
+    });
+    setIsDirty(true);
+  };
+
+  const updateTransform = (idx: number, value: string) => {
+    setMappings((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], transformation: value === "none" ? undefined : value };
+      return next;
+    });
+    setIsDirty(true);
+  };
+
+  const handleSave = () => {
+    // TODO: implement PATCH /api/v1/configurations/{id} once backend supports it
+    toast("Mappings saved locally (backend PATCH not yet implemented).", "success");
+    setIsDirty(false);
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-gray-500">Field Mappings ({mappings.length})</p>
+        {isDirty && (
+          <button type="button" className="btn-primary text-xs py-1 px-2.5" onClick={handleSave}>
+            <Save className="h-3 w-3" />
+            Save Mappings
+          </button>
+        )}
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-800 bg-gray-900/60">
+              <th className="px-3 py-2 text-left font-medium text-gray-500">Source</th>
+              <th className="px-3 py-2 text-center text-gray-700">→</th>
+              <th className="px-3 py-2 text-left font-medium text-gray-500">Target</th>
+              <th className="px-3 py-2 text-left font-medium text-gray-500">Confidence</th>
+              <th className="px-3 py-2 text-left font-medium text-gray-500">Transform</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800/60">
+            {mappings.map((fm, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: field mappings lack stable id
+              <tr key={i} className="hover:bg-gray-800/30">
+                <td className="px-3 py-2 font-mono text-gray-300">{fm.source_field}</td>
+                <td className="px-3 py-2 text-center text-gray-700">
+                  <ChevronRight className="h-3 w-3 mx-auto" />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="text"
+                    value={fm.target_field}
+                    placeholder="Enter target field..."
+                    onChange={(e) => updateTarget(i, e.target.value)}
+                    className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-gray-300 placeholder:text-gray-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </td>
+                <td className="px-3 py-2 w-32">
+                  <ConfidenceBar value={fm.confidence} />
+                </td>
+                <td className="px-3 py-2">
+                  <select
+                    value={fm.transformation ?? "none"}
+                    onChange={(e) => updateTransform(i, e.target.value)}
+                    className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-300 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    {TRANSFORM_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ConfigDetail({ cfg }: { cfg: Configuration }) {
   const [showRaw, setShowRaw] = useState(false);
+  const [activeTab, setActiveTab] = useState<"mappings" | "history">("mappings");
+  const { toast } = useToast();
+
+  const handleExport = async (format: "json" | "yaml") => {
+    try {
+      const blob = await configurationsApi.export(cfg.id, format);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${cfg.name.replace(/\s+/g, "_")}_v${cfg.version}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast("Export failed.", "error");
+    }
+  };
 
   return (
     <div className="border-t border-gray-800 bg-gray-900/40 px-6 py-4 space-y-4">
@@ -212,43 +441,68 @@ function ConfigDetail({ cfg }: { cfg: Configuration }) {
         <StatusStepper status={cfg.status} />
       </div>
 
-      {/* Field mappings table */}
-      {cfg.field_mappings.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-gray-500 mb-2">
-            Field Mappings ({cfg.field_mappings.length})
-          </p>
-          <div className="overflow-x-auto rounded-lg border border-gray-800">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-gray-800 bg-gray-900/60">
-                  <th className="px-3 py-2 text-left font-medium text-gray-500">Source</th>
-                  <th className="px-3 py-2 text-center text-gray-700">→</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-500">Target</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-500">Confidence</th>
-                  <th className="px-3 py-2 text-left font-medium text-gray-500">Transform</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800/60">
-                {cfg.field_mappings.map((fm, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: field mappings lack stable id
-                  <tr key={i} className="hover:bg-gray-800/30">
-                    <td className="px-3 py-2 font-mono text-gray-300">{fm.source_field}</td>
-                    <td className="px-3 py-2 text-center text-gray-700">
-                      <ChevronRight className="h-3 w-3 mx-auto" />
-                    </td>
-                    <td className="px-3 py-2 font-mono text-gray-300">{fm.target_field}</td>
-                    <td className="px-3 py-2 w-32">
-                      <ConfidenceBar value={fm.confidence} />
-                    </td>
-                    <td className="px-3 py-2 text-gray-400">{fm.transformation || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {/* Export buttons */}
+      <div>
+        <p className="text-xs font-medium text-gray-500 mb-2">Export</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn-secondary text-xs py-1.5 px-3"
+            onClick={() => handleExport("json")}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export JSON
+          </button>
+          <button
+            type="button"
+            className="btn-secondary text-xs py-1.5 px-3"
+            onClick={() => handleExport("yaml")}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export YAML
+          </button>
         </div>
-      )}
+      </div>
+
+      {/* Tabs: Mappings / History */}
+      <div>
+        <div className="flex gap-1 border-b border-gray-800 mb-3">
+          <button
+            type="button"
+            className={clsx(
+              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
+              activeTab === "mappings"
+                ? "border-indigo-500 text-indigo-400"
+                : "border-transparent text-gray-500 hover:text-gray-300"
+            )}
+            onClick={() => setActiveTab("mappings")}
+          >
+            <Settings className="h-3 w-3" />
+            Mappings
+          </button>
+          <button
+            type="button"
+            className={clsx(
+              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
+              activeTab === "history"
+                ? "border-indigo-500 text-indigo-400"
+                : "border-transparent text-gray-500 hover:text-gray-300"
+            )}
+            onClick={() => setActiveTab("history")}
+          >
+            <History className="h-3 w-3" />
+            History
+          </button>
+        </div>
+
+        {activeTab === "mappings" && cfg.field_mappings.length > 0 && (
+          <EditableFieldMappings cfg={cfg} />
+        )}
+        {activeTab === "mappings" && cfg.field_mappings.length === 0 && (
+          <p className="text-xs text-gray-500">No field mappings configured.</p>
+        )}
+        {activeTab === "history" && <HistoryPanel configId={cfg.id} currentVersion={cfg.version} />}
+      </div>
 
       {/* Validate section */}
       <div>

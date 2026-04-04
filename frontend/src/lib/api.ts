@@ -3,6 +3,7 @@ import type {
   Adapter,
   AdapterListResponse,
   AuditEntry,
+  ConfigHistoryEntry,
   ConfigTemplateResponse,
   ConfigValidationResult,
   Configuration,
@@ -92,6 +93,20 @@ export const configurationsApi = {
     api
       .get<APIResponse<ConfigTemplateResponse[]>>("/api/v1/configurations/templates")
       .then((r) => r.data),
+  export: (id: string, format: "json" | "yaml" = "json") =>
+    api
+      .get(`/api/v1/configurations/${id}/export?format=${format}`, { responseType: "blob" })
+      .then((r) => r.data as Blob),
+  history: (id: string) =>
+    api
+      .get<APIResponse<ConfigHistoryEntry[]>>(`/api/v1/configurations/${id}/history`)
+      .then((r) => r.data),
+  rollback: (id: string, targetVersion: number) =>
+    api
+      .post<APIResponse<Configuration>>(`/api/v1/configurations/${id}/rollback`, {
+        target_version: targetVersion,
+      })
+      .then((r) => r.data),
 };
 
 export const simulationsApi = {
@@ -116,6 +131,44 @@ export const auditApi = {
       .get<APIResponse<PaginatedResponse<AuditEntry>>>("/api/v1/audit/", {
         params: filters,
       })
+      .then((r) => r.data),
+};
+
+export interface DashboardAnalytics {
+  weekly_activity?: Array<{ name: string; documents: number; simulations: number }>;
+  throughput?: Array<{ hour: string; records: number }>;
+  total_processed?: number;
+  total_warnings?: number;
+}
+
+export const analyticsApi = {
+  dashboard: () =>
+    api.get<APIResponse<DashboardAnalytics>>("/api/v1/analytics/dashboard").then((r) => r.data),
+};
+
+export const searchApi = {
+  search: (q: string) =>
+    api
+      .get(`/api/v1/search/?q=${encodeURIComponent(q)}`, {
+        headers: { "X-Tenant-ID": "default" },
+      })
+      .then((r) => r.data),
+};
+
+export const webhooksApi = {
+  list: () =>
+    api.get("/api/v1/webhooks/", { headers: { "X-Tenant-ID": "default" } }).then((r) => r.data),
+  create: (data: { url: string; events: string[]; secret?: string }) =>
+    api
+      .post("/api/v1/webhooks/", data, { headers: { "X-Tenant-ID": "default" } })
+      .then((r) => r.data),
+  delete: (id: string) =>
+    api
+      .delete(`/api/v1/webhooks/${id}`, { headers: { "X-Tenant-ID": "default" } })
+      .then((r) => r.data),
+  test: (id: string) =>
+    api
+      .post(`/api/v1/webhooks/${id}/test`, {}, { headers: { "X-Tenant-ID": "default" } })
       .then((r) => r.data),
 };
 
