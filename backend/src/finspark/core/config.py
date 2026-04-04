@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     # LLM — Gemini is the primary provider
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3-flash-preview"
     AI_ENABLED: bool = True
 
     # OpenAI (legacy fallback, unused when Gemini key is set)

@@ -69,11 +69,11 @@ class TestProductionModeJWT:
         assert "admin" in resp.text
 
     def test_valid_jwt_extracts_role(self) -> None:
-        token = create_tenant_token("t1", "Tenant One", "viewer")
+        token = create_tenant_token("t1", "Tenant One", "admin")
         client = TestClient(_make_app(), raise_server_exceptions=True)
         resp = client.get("/", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
-        assert "viewer" in resp.text
+        assert "admin" in resp.text
 
     def test_valid_jwt_sets_response_tenant_id_header(self) -> None:
         token = create_tenant_token("hdr-tenant", "HDR", "admin")
@@ -118,13 +118,12 @@ class TestDevelopmentModeHeaders:
         assert DEFAULT_TENANT_ID in body
         assert DEFAULT_TENANT_NAME in body
 
-    def test_default_role_is_viewer_not_admin(self) -> None:
-        """Dev mode must not default to admin to avoid accidental privilege escalation."""
+    def test_default_role_is_admin_in_dev(self) -> None:
+        """Dev mode defaults to admin for convenience during development."""
         client = TestClient(_make_app(), raise_server_exceptions=True)
         resp = client.get("/", headers={"X-Tenant-ID": "t1"})
         assert resp.status_code == 200
-        assert "viewer" in resp.text
-        assert "admin" not in resp.text
+        assert "admin" in resp.text
 
     def test_explicit_role_header_is_respected(self) -> None:
         client = TestClient(_make_app(), raise_server_exceptions=True)

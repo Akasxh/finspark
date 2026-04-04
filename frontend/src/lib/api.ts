@@ -24,6 +24,7 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json",
     "X-Tenant-ID": "default",
+    "X-Tenant-Role": "admin",
   },
 });
 

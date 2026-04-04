@@ -75,7 +75,7 @@ class GeminiClient:
 
         resp = await self._http_client.post(
             url,
-            params={"key": self.api_key},
+            headers={"x-goog-api-key": self.api_key},
             json=body,
         )
 

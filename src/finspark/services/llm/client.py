@@ -49,6 +49,10 @@ class GeminiClient:
             },
         )
 
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
+
     async def generate(
         self,
         prompt: str,
@@ -61,11 +65,14 @@ class GeminiClient:
         """Send a prompt to Gemini and return the text response."""
         url = f"{_BASE_URL}/models/{self.model}:generateContent"
 
+        # Thinking models (Gemini 3+) need extra tokens for internal reasoning
+        effective_tokens = max(max_tokens, 256)
+
         body: dict[str, Any] = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
-                "maxOutputTokens": max_tokens,
+                "maxOutputTokens": effective_tokens,
             },
         }
 
@@ -92,7 +99,19 @@ class GeminiClient:
 
         data = resp.json()
         try:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            candidate = data["candidates"][0]
+            # Check for finish reason indicating content was truncated
+            finish = candidate.get("finishReason", "")
+            content = candidate.get("content", {})
+            parts = content.get("parts", [])
+            if not parts:
+                if finish == "MAX_TOKENS":
+                    raise GeminiAPIError(
+                        "Gemini response truncated (MAX_TOKENS) — "
+                        "thinking model may need higher maxOutputTokens"
+                    )
+                raise GeminiAPIError(f"Empty response from Gemini (finishReason={finish})")
+            return parts[0]["text"]
         except (KeyError, IndexError) as exc:
             logger.error("gemini_unexpected_response data=%s", data)
             raise GeminiAPIError("Unexpected response structure from Gemini") from exc

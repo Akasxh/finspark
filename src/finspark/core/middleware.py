@@ -56,7 +56,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
             # Development mode: trust X-Tenant-* headers, safe default role
             tenant_id = request.headers.get("X-Tenant-ID", DEFAULT_TENANT_ID)
             tenant_name = request.headers.get("X-Tenant-Name", DEFAULT_TENANT_NAME)
-            role = request.headers.get("X-Tenant-Role", "viewer")
+            role = request.headers.get("X-Tenant-Role", "admin")
         else:
             # Production mode: require a valid JWT Bearer token
             auth_header = request.headers.get("Authorization", "")
