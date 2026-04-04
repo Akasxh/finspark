@@ -49,6 +49,12 @@ class GeminiClient:
             },
         )
 
+    def _safe_url(self, url: str) -> str:
+        """Return URL with the API key redacted."""
+        if self.api_key:
+            return url.replace(self.api_key, "***")
+        return url
+
     async def close(self) -> None:
         """Close the underlying HTTP client."""
         await self._client.aclose()
@@ -85,16 +91,17 @@ class GeminiClient:
         try:
             resp = await self._client.post(url, json=body)
         except httpx.TimeoutException as exc:
-            logger.error("gemini_timeout url=%s", url)
+            logger.error("gemini_timeout url=%s", self._safe_url(url))
             raise GeminiAPIError("Gemini API request timed out") from exc
         except httpx.NetworkError as exc:
-            logger.error("gemini_network_error url=%s error=%s", url, exc)
+            logger.error("gemini_network_error url=%s error=%s", self._safe_url(url), exc)
             raise GeminiAPIError(f"Network error communicating with Gemini: {exc}") from exc
 
         if resp.status_code != 200:
-            logger.error("gemini_api_error status=%s body=%s", resp.status_code, resp.text[:500])
+            safe_body = resp.text[:200].replace(self.api_key, "***") if self.api_key else resp.text[:200]
+            logger.error("gemini_api_error status=%s body=%s", resp.status_code, safe_body)
             raise GeminiAPIError(
-                f"Gemini API returned {resp.status_code}: {resp.text[:300]}"
+                f"Gemini API returned {resp.status_code}: {safe_body}"
             )
 
         data = resp.json()
@@ -137,3 +144,21 @@ class GeminiClient:
         except json.JSONDecodeError as exc:
             logger.error("gemini_json_parse_error text=%s", text[:500])
             raise GeminiAPIError(f"Failed to parse Gemini JSON response: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Module-level shared client (created lazily, closed by app lifespan)
+# ---------------------------------------------------------------------------
+_shared_client: GeminiClient | None = None
+
+
+def get_llm_client() -> GeminiClient:
+    """Return (or lazily create) the module-level shared GeminiClient.
+
+    The lifespan handler in main.py calls ``_shared_client.close()`` on shutdown
+    so the httpx connection pool is released cleanly.
+    """
+    global _shared_client  # noqa: PLW0603
+    if _shared_client is None:
+        _shared_client = GeminiClient()
+    return _shared_client

@@ -10,7 +10,7 @@ GET    /adapters/{adapter_id}/versions    — list all semver versions
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -67,7 +67,7 @@ async def create_adapter(
     _user: Annotated[UserContext, Depends(require_roles("admin", "superadmin"))],
 ) -> AdapterRecord:
     # TODO: persist adapter record, enforce version uniqueness
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return AdapterRecord(
         id=uuid.uuid4(),
         name=body.name,

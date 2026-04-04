@@ -8,7 +8,7 @@ DELETE /tenants/{tenant_id}  — soft-delete tenant (superadmin only)
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -65,7 +65,7 @@ async def create_tenant(
     _user: _SuperAdmin,
 ) -> TenantRecord:
     # TODO: persist tenant, create vault key, emit audit event
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return TenantRecord(
         id=uuid.uuid4(),
         name=body.name,

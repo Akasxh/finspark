@@ -10,7 +10,7 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -32,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 
 def _make_record(status: ConfigStatus, payload: dict | None = None) -> ConfigRecord:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return ConfigRecord(
         id=uuid.uuid4(),
         tenant_id=uuid.uuid4(),

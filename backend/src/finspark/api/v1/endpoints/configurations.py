@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -135,7 +135,7 @@ async def generate_configuration(
     db: DbDep,
     _user: CurrentUser,
 ) -> ConfigRecord:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {}
     generation_method = "rule_based"
 

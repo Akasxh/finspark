@@ -8,7 +8,7 @@ POST   /simulations/{simulation_id}/cancel   — cancel a running simulation
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 import structlog
@@ -58,7 +58,7 @@ async def run_simulation(
     _user: CurrentUser,
 ) -> SimulationRecord:
     # TODO: enqueue simulation task
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return SimulationRecord(
         id=uuid.uuid4(),
         tenant_id=body.tenant_id,

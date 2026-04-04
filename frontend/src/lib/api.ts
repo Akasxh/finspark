@@ -21,6 +21,7 @@ import axios from "axios";
 
 const api = axios.create({
   baseURL: "",
+  timeout: 30_000,
   headers: {
     "Content-Type": "application/json",
     "X-Tenant-ID": "default",
@@ -32,6 +33,9 @@ api.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
     if (axios.isAxiosError(error)) {
+      if (error.code === "ECONNABORTED") {
+        console.error("[API] Request timed out");
+      }
       console.error("[API Error]", error.response?.status, error.message);
     }
     return Promise.reject(error);

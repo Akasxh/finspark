@@ -16,10 +16,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
+# Create non-root user
+RUN adduser --disabled-password --gecos '' appuser
+
 # ----- Development -----
 FROM base AS development
 RUN uv sync --frozen --extra dev
 COPY . .
+RUN chown -R appuser:appuser /app
+USER appuser
 EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "finspark.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
@@ -27,5 +32,7 @@ CMD ["uv", "run", "uvicorn", "finspark.main:app", "--host", "0.0.0.0", "--port",
 FROM base AS production
 RUN uv sync --frozen --no-dev
 COPY . .
+RUN chown -R appuser:appuser /app
+USER appuser
 EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "finspark.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

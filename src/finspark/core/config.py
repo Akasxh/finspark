@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     jwt_expiry_minutes: int = 60
     encryption_key: str = "change-me-in-production"
 
+    # Hosting
+    allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
+
+    # Rate limiting
+    rate_limit_max_requests: int = 100
+    rate_limit_window_seconds: int = 60
+
     # File uploads
     upload_dir: Path = Path("./uploads")
     max_upload_size_mb: int = 50

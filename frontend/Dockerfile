@@ -2,11 +2,16 @@ FROM oven/bun:1 AS base
 
 WORKDIR /app
 
+# Create non-root user
+RUN adduser --disabled-password --gecos '' appuser
+
 # ----- Development -----
 FROM base AS development
 COPY package.json bun.lockb* ./
 RUN bun install --frozen-lockfile
 COPY . .
+RUN chown -R appuser:appuser /app
+USER appuser
 EXPOSE 5173
 CMD ["bun", "run", "dev", "--host", "0.0.0.0"]
 

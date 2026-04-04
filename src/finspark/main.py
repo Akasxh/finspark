@@ -5,8 +5,11 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import JSONResponse, Response
 
 from finspark.api.routes import (
     adapters,
@@ -21,6 +24,7 @@ from finspark.api.routes import (
 )
 from finspark.core.config import settings
 from finspark.core.database import init_db
+from finspark.core.logging_filter import PIIMaskingFilter
 from finspark.core.middleware import (
     DeprecationHeaderMiddleware,
     RequestLoggingMiddleware,
@@ -28,16 +32,48 @@ from finspark.core.middleware import (
 )
 from finspark.core.rate_limiter import RateLimiterMiddleware, metrics
 
+logger = logging.getLogger(__name__)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 
+# Wire PII masking into all log output
+logging.getLogger().addFilter(PIIMaskingFilter())
+
+
+async def _run_migrations() -> None:
+    """Run Alembic migrations, falling back to create_all for dev."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            logger.info("Alembic migrations applied successfully")
+            return
+        logger.warning(
+            "Alembic migration failed (rc=%d): %s — falling back to create_all",
+            result.returncode,
+            result.stderr.strip(),
+        )
+    except Exception as exc:
+        logger.warning("Alembic unavailable (%s) — falling back to create_all", exc)
+    await init_db()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan - initialize DB and seed data on startup."""
-    await init_db()
+    if settings.debug:
+        await init_db()
+    else:
+        await _run_migrations()
     await _seed_adapters()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,6 +97,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    # Shutdown: close the LLM client connection pool if it was created
+    from finspark.services.llm.client import _shared_client  # noqa: PLC0415
+
+    if _shared_client is not None:
+        await _shared_client.close()
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Inject standard security headers into every response."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data:; "
+            "connect-src 'self'"
+        )
+        return response
+
 
 app = FastAPI(
     title=settings.app_name,
@@ -72,6 +134,7 @@ app = FastAPI(
 )
 
 # Middleware (order matters - last added = first executed)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(DeprecationHeaderMiddleware)
 app.add_middleware(RateLimiterMiddleware)
@@ -84,6 +147,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Tenant-ID", "X-Tenant-Name", "X-Tenant-Role"],
 )
 
+# Trusted host validation (production only)
+if not settings.debug:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+
 # Routes
 app.include_router(health.router)
 app.include_router(documents.router, prefix="/api/v1")
@@ -94,6 +161,14 @@ app.include_router(audit.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(analytics.router)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch all unhandled exceptions — log full traceback server-side,
+    return a generic 500 to avoid leaking stack traces to clients."""
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/metrics")

@@ -16,7 +16,7 @@ from uuid import UUID
 import structlog
 from fastapi import Depends, Header, HTTPException, Query, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
+from jwt.exceptions import PyJWTError as JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.core.config import settings
