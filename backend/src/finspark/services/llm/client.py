@@ -5,6 +5,7 @@ generativelanguage.googleapis.com v1beta endpoint.
 """
 from __future__ import annotations
 
+import functools
 import json
 from typing import Any
 
@@ -38,6 +39,12 @@ class GeminiClient:
                 "Add it to .env or pass api_key explicitly."
             )
 
+        self._http_client = httpx.AsyncClient(timeout=self.timeout)
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client. Call on application shutdown."""
+        await self._http_client.aclose()
+
     async def generate(
         self,
         prompt: str,
@@ -66,12 +73,11 @@ class GeminiClient:
         if response_json:
             body["generationConfig"]["responseMimeType"] = "application/json"
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                url,
-                params={"key": self.api_key},
-                json=body,
-            )
+        resp = await self._http_client.post(
+            url,
+            params={"key": self.api_key},
+            json=body,
+        )
 
         if resp.status_code != 200:
             logger.error(
@@ -117,12 +123,12 @@ class GeminiAPIError(Exception):
     """Raised when the Gemini API returns an error or unexpected response."""
 
 
-_client: GeminiClient | None = None
-
-
+@functools.lru_cache(maxsize=1)
 def get_llm_client() -> GeminiClient:
-    """Singleton accessor for the Gemini client."""
-    global _client  # noqa: PLW0603
-    if _client is None:
-        _client = GeminiClient()
-    return _client
+    """Singleton accessor for the Gemini client (cached, async-safe)."""
+    return GeminiClient()
+
+
+def reset_client() -> None:
+    """Clear the cached singleton. Primarily for use in tests."""
+    get_llm_client.cache_clear()

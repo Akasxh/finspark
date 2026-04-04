@@ -59,10 +59,14 @@ class TestGeminiClient:
         assert client.api_key == "my-key"
         assert client.model == "gemini-2.5-pro"
 
+    def test_init_creates_http_client(self) -> None:
+        client = GeminiClient(api_key="my-key", model="gemini-2.5-flash")
+        assert isinstance(client._http_client, httpx.AsyncClient)
+
     async def test_generate_returns_text(self, gemini_client: GeminiClient) -> None:
         mock_resp = _mock_gemini_response("Hello world")
 
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        with patch.object(gemini_client._http_client, "post", new_callable=AsyncMock, return_value=mock_resp):
             result = await gemini_client.generate("Say hello")
 
         assert result == "Hello world"
@@ -72,7 +76,7 @@ class TestGeminiClient:
     ) -> None:
         mock_resp = _mock_gemini_response("Structured output")
 
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
+        with patch.object(gemini_client._http_client, "post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
             await gemini_client.generate(
                 "Generate config",
                 system_instruction="You are FinSpark",
@@ -85,7 +89,7 @@ class TestGeminiClient:
     async def test_generate_api_error(self, gemini_client: GeminiClient) -> None:
         mock_resp = _mock_error_response(403, "API key invalid")
 
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        with patch.object(gemini_client._http_client, "post", new_callable=AsyncMock, return_value=mock_resp):
             with pytest.raises(GeminiAPIError, match="403"):
                 await gemini_client.generate("test")
 
@@ -95,7 +99,7 @@ class TestGeminiClient:
         payload = {"base_url": "https://api.example.com", "timeout_ms": 3000}
         mock_resp = _mock_gemini_response(json.dumps(payload))
 
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        with patch.object(gemini_client._http_client, "post", new_callable=AsyncMock, return_value=mock_resp):
             result = await gemini_client.generate_json("Generate config")
 
         assert result == payload
@@ -103,7 +107,7 @@ class TestGeminiClient:
     async def test_generate_json_bad_json(self, gemini_client: GeminiClient) -> None:
         mock_resp = _mock_gemini_response("not valid json {{{")
 
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        with patch.object(gemini_client._http_client, "post", new_callable=AsyncMock, return_value=mock_resp):
             with pytest.raises(GeminiAPIError, match="Failed to parse"):
                 await gemini_client.generate_json("Generate config")
 
@@ -115,6 +119,6 @@ class TestGeminiClient:
             json={"candidates": []},
         )
 
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=bad_resp):
+        with patch.object(gemini_client._http_client, "post", new_callable=AsyncMock, return_value=bad_resp):
             with pytest.raises(GeminiAPIError, match="Unexpected response"):
                 await gemini_client.generate("test")
