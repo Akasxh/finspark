@@ -646,7 +646,7 @@ export default function Configurations() {
         <div className="card p-6">
           <div className="mb-4 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-indigo-400" />
-            <h3 className="font-semibold text-white">Generate New Configuration</h3>
+            <h2 className="font-semibold text-white">Generate New Configuration</h2>
           </div>
           <form
             onSubmit={(e) => {

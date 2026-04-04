@@ -1,4 +1,4 @@
-import { adaptersApi, configurationsApi, documentsApi } from "@/lib/api";
+import { adaptersApi, analyticsApi, configurationsApi, documentsApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
@@ -25,7 +25,7 @@ import {
   YAxis,
 } from "recharts";
 
-const activityData = [
+const SAMPLE_ACTIVITY_DATA = [
   { name: "Mon", documents: 12, simulations: 4 },
   { name: "Tue", documents: 19, simulations: 7 },
   { name: "Wed", documents: 8, simulations: 3 },
@@ -35,13 +35,7 @@ const activityData = [
   { name: "Sun", documents: 3, simulations: 1 },
 ];
 
-const statusData = [
-  { name: "Active", value: 8, color: "#10b981" },
-  { name: "Inactive", value: 3, color: "#6b7280" },
-  { name: "Error", value: 1, color: "#ef4444" },
-];
-
-const throughputData = [
+const SAMPLE_THROUGHPUT_DATA = [
   { hour: "00:00", records: 1200 },
   { hour: "04:00", records: 800 },
   { hour: "08:00", records: 2400 },
@@ -49,6 +43,12 @@ const throughputData = [
   { hour: "16:00", records: 2800 },
   { hour: "20:00", records: 1800 },
 ];
+
+const STATUS_COLORS: Record<string, string> = {
+  Active: "#10b981",
+  Inactive: "#6b7280",
+  Error: "#ef4444",
+};
 
 interface MetricCardProps {
   title: string;
@@ -82,6 +82,36 @@ function MetricCard({ title, value, subtitle, icon: Icon, trend, color }: Metric
   );
 }
 
+function formatProcessed(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k processed` : `${n} processed`;
+}
+
+function resolveChartSeries<T>(
+  raw: T[] | undefined,
+  fallback: T[]
+): { data: T[]; isSample: boolean } {
+  const hasData = raw && raw.length > 0;
+  return { data: hasData ? raw : fallback, isSample: !hasData };
+}
+
+function buildAdapterPieData(adapterList: Array<{ is_active: boolean; status?: string }>) {
+  const counts: Record<string, number> = { Active: 0, Inactive: 0, Error: 0 };
+  for (const a of adapterList) {
+    if (a.is_active) counts.Active++;
+    else if (a.status === "error") counts.Error++;
+    else counts.Inactive++;
+  }
+  return Object.entries(counts)
+    .filter(([, v]) => v > 0)
+    .map(([name, value]) => ({ name, value, color: STATUS_COLORS[name] ?? "#6b7280" }));
+}
+
+const FALLBACK_PIE = [
+  { name: "Active", value: 8, color: STATUS_COLORS.Active },
+  { name: "Inactive", value: 3, color: STATUS_COLORS.Inactive },
+  { name: "Error", value: 1, color: STATUS_COLORS.Error },
+];
+
 export default function Dashboard() {
   const adapters = useQuery({ queryKey: ["adapters"], queryFn: () => adaptersApi.list() });
   const documents = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
@@ -89,10 +119,39 @@ export default function Dashboard() {
     queryKey: ["configurations"],
     queryFn: () => configurationsApi.list(),
   });
+  const analytics = useQuery({
+    queryKey: ["analytics", "dashboard"],
+    queryFn: () => analyticsApi.dashboard(),
+    retry: false,
+  });
 
   const adapterCount = adapters.data?.data?.total ?? 0;
   const docCount = documents.data?.data?.length ?? 0;
   const configCount = configs.data?.data?.length ?? 0;
+
+  const analyticsData = analytics.data?.data;
+
+  const activity = resolveChartSeries(analyticsData?.weekly_activity, SAMPLE_ACTIVITY_DATA);
+  const activityData = activity.data;
+  const activityLabel = activity.isSample
+    ? "Documents & simulations processed (Sample data)"
+    : "Documents & simulations processed";
+
+  const throughput = resolveChartSeries(analyticsData?.throughput, SAMPLE_THROUGHPUT_DATA);
+  const throughputData = throughput.data;
+  const throughputLabel = throughput.isSample
+    ? "Records processed per hour (Sample data)"
+    : "Records processed per hour (today)";
+
+  const totalProcessed = analyticsData?.total_processed ?? 12200;
+  const totalWarnings = analyticsData?.total_warnings ?? 23;
+  const processedLabel = formatProcessed(totalProcessed);
+
+  const adapterList = adapters.data?.data?.adapters ?? [];
+  const statusData = buildAdapterPieData(adapterList);
+  const pieData = statusData.length > 0 ? statusData : FALLBACK_PIE;
+  const pieSubtitle =
+    statusData.length === 0 ? "Current distribution (Sample data)" : "Current distribution";
 
   return (
     <div className="space-y-6">
@@ -141,10 +200,10 @@ export default function Dashboard() {
         <div className="card p-6 lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h3 className="font-semibold text-white">Weekly Activity</h3>
-              <p className="text-xs text-gray-400">Documents & simulations processed</p>
+              <h2 className="font-semibold text-white">Weekly Activity</h2>
+              <p className="text-xs text-gray-400">{activityLabel}</p>
             </div>
-            <Activity className="h-4 w-4 text-gray-500" />
+            <Activity className="h-4 w-4 text-gray-500" aria-hidden="true" />
           </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -170,14 +229,14 @@ export default function Dashboard() {
         {/* Status pie */}
         <div className="card p-6">
           <div className="mb-4">
-            <h3 className="font-semibold text-white">Adapter Status</h3>
-            <p className="text-xs text-gray-400">Current distribution</p>
+            <h2 className="font-semibold text-white">Adapter Status</h2>
+            <p className="text-xs text-gray-400">{pieSubtitle}</p>
           </div>
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={statusData}
+                  data={pieData}
                   cx="50%"
                   cy="50%"
                   innerRadius={50}
@@ -185,7 +244,7 @@ export default function Dashboard() {
                   paddingAngle={4}
                   dataKey="value"
                 >
-                  {statusData.map((entry) => (
+                  {pieData.map((entry) => (
                     <Cell key={entry.name} fill={entry.color} />
                   ))}
                 </Pie>
@@ -201,7 +260,7 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
           <div className="mt-2 space-y-2">
-            {statusData.map((s) => (
+            {pieData.map((s) => (
               <div key={s.name} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
@@ -218,17 +277,17 @@ export default function Dashboard() {
       <div className="card p-6">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-white">Data Throughput</h3>
-            <p className="text-xs text-gray-400">Records processed per hour (today)</p>
+            <h2 className="font-semibold text-white">Data Throughput</h2>
+            <p className="text-xs text-gray-400">{throughputLabel}</p>
           </div>
           <div className="flex items-center gap-4 text-xs">
             <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-              <span className="text-gray-400">12.2k processed</span>
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
+              <span className="text-gray-400">{processedLabel}</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
-              <span className="text-gray-400">23 warnings</span>
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" aria-hidden="true" />
+              <span className="text-gray-400">{totalWarnings} warnings</span>
             </div>
           </div>
         </div>

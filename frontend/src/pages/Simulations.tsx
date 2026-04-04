@@ -133,7 +133,7 @@ function SimCard({ sim, configName }: { sim: Simulation; configName?: string }) 
           </span>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mt-4 grid grid-cols-1 gap-3 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
           <div className="rounded-lg bg-gray-800/50 p-3">
             <p className="text-xs text-gray-500">Success Rate</p>
             <p
@@ -267,7 +267,7 @@ export default function Simulations() {
         <div className="card p-6">
           <div className="mb-4 flex items-center gap-2">
             <Zap className="h-4 w-4 text-indigo-400" />
-            <h3 className="font-semibold text-white">New Simulation</h3>
+            <h2 className="font-semibold text-white">New Simulation</h2>
           </div>
           <form
             onSubmit={(e) => {
@@ -343,7 +343,7 @@ export default function Simulations() {
         <div className="card p-6">
           <div className="mb-4 flex items-center gap-2">
             <BarChart3 className="h-4 w-4 text-gray-400" />
-            <h3 className="font-semibold text-white">Success Rates</h3>
+            <h2 className="font-semibold text-white">Success Rates</h2>
           </div>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
