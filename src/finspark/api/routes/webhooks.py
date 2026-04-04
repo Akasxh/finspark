@@ -14,6 +14,7 @@ from finspark.api.dependencies import get_audit_service, get_tenant_context, req
 from finspark.core.audit import AuditService
 from finspark.core.database import get_db
 from finspark.core.security import encrypt_value
+from finspark.core.url_validator import is_safe_url
 from finspark.models.webhook import Webhook, WebhookDelivery
 from finspark.schemas.common import APIResponse, TenantContext
 from finspark.schemas.webhooks import WebhookCreate, WebhookDeliveryResponse, WebhookResponse
@@ -41,6 +42,9 @@ async def register_webhook(
     audit: AuditService = Depends(get_audit_service),
 ) -> APIResponse[WebhookResponse]:
     """Register a new webhook endpoint."""
+    if not is_safe_url(str(body.url)):
+        raise HTTPException(status_code=400, detail="URL resolves to a blocked or private network address")
+
     wh = Webhook(
         id=str(uuid.uuid4()),
         tenant_id=tenant.tenant_id,
@@ -129,6 +133,9 @@ async def test_webhook(
     wh = result.scalar_one_or_none()
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook not found")
+
+    if not is_safe_url(wh.url):
+        raise HTTPException(status_code=400, detail="Webhook URL resolves to a blocked or private network address")
 
     test_payload = {
         "event": "webhook.test",

@@ -1,5 +1,6 @@
 """Webhook event delivery service."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.core.database import async_session_factory
 from finspark.core.security import decrypt_value
+from finspark.core.url_validator import is_safe_url
 from finspark.models.webhook import Webhook, WebhookDelivery
 
 logger = logging.getLogger(__name__)
@@ -30,12 +32,14 @@ async def deliver_event(tenant_id: str, event_type: str, payload: dict[str, Any]
         )
         webhooks = result.scalars().all()
 
-        for wh in webhooks:
-            events = json.loads(wh.events) if isinstance(wh.events, str) else wh.events
-            if event_type not in events and "*" not in events:
-                continue
+        matching_webhooks = [
+            wh for wh in webhooks
+            if event_type in (json.loads(wh.events) if isinstance(wh.events, str) else wh.events)
+            or "*" in (json.loads(wh.events) if isinstance(wh.events, str) else wh.events)
+        ]
 
-            await _send_webhook(db, wh, event_type, payload)
+        tasks = [_send_webhook(db, wh, event_type, payload) for wh in matching_webhooks]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
         await db.commit()
 
@@ -44,6 +48,10 @@ async def _send_webhook(
     db: AsyncSession, webhook: Webhook, event_type: str, payload: dict[str, Any]
 ) -> None:
     """Send a single webhook delivery with retry."""
+    if not is_safe_url(webhook.url):
+        logger.warning("Blocked SSRF attempt for webhook %s url=%s", webhook.id, webhook.url)
+        return
+
     body = json.dumps({
         "event": event_type,
         "timestamp": time.time(),
@@ -90,5 +98,7 @@ async def _send_webhook(
                 webhook.id,
                 str(e),
             )
+        if attempt < max_attempts:
+            await asyncio.sleep(2 ** attempt)  # 2s, 4s backoff
 
     delivery.status = "failed"

@@ -3,6 +3,7 @@
 import io
 import json
 import logging
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -407,7 +408,8 @@ async def export_configuration(
         media_type = "application/json"
         ext = "json"
 
-    filename = f"{config.name.replace(' ', '_')}_{config.version}.{ext}"
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', config.name)
+    filename = f"{safe_name}_{config.version}.{ext}"
     buffer = io.BytesIO(content.encode("utf-8"))
 
     return StreamingResponse(
