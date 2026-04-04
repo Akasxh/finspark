@@ -7,7 +7,10 @@ interface SkeletonProps {
 
 function Skeleton({ className, style }: SkeletonProps) {
   return (
-    <div className={clsx("animate-pulse rounded-md bg-gray-800/70", className)} style={style} />
+    <div
+      className={clsx("animate-pulse rounded-md", className)}
+      style={{ backgroundColor: "var(--color-bg-raised)", ...style }}
+    />
   );
 }
 

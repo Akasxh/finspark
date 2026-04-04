@@ -8,7 +8,6 @@ import type {
   FieldMapping,
 } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import clsx from "clsx";
 import {
   AlertCircle,
   BarChart3,
@@ -28,14 +27,18 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-const statusConfig: Record<string, { label: string; cls: string }> = {
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const STATUS_STEPS = ["draft", "configured", "testing", "active"] as const;
+type StatusStep = (typeof STATUS_STEPS)[number];
+
+const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   draft: { label: "Draft", cls: "badge-yellow" },
   configured: { label: "Configured", cls: "badge-blue" },
   validating: { label: "Validating", cls: "badge-blue" },
   testing: { label: "Testing", cls: "badge-blue" },
   active: { label: "Active", cls: "badge-green" },
   deprecated: { label: "Deprecated", cls: "badge-gray" },
-  rollback: { label: "Rollback", cls: "badge-yellow" },
 };
 
 const TRANSITION_BUTTONS: Record<
@@ -43,55 +46,38 @@ const TRANSITION_BUTTONS: Record<
   { label: string; icon: React.ElementType; targetState: string }[]
 > = {
   draft: [{ label: "Mark Configured", icon: CheckCircle2, targetState: "configured" }],
-  configured: [{ label: "Start Validation", icon: PlayCircle, targetState: "testing" }],
+  configured: [{ label: "Start Testing", icon: PlayCircle, targetState: "testing" }],
   testing: [{ label: "Deploy", icon: Rocket, targetState: "active" }],
 };
 
-const STATUS_STEPS = ["draft", "configured", "testing", "active"];
-
 const TRANSFORM_OPTIONS = [
-  "none",
-  "upper",
-  "lower",
-  "parse_number",
-  "parse_date",
-  "normalize_phone",
-  "validate_email",
-  "to_string",
-  "format_date",
-  "parse_boolean",
+  "none", "upper", "lower", "parse_number", "parse_date",
+  "normalize_phone", "validate_email", "to_string", "format_date", "parse_boolean",
 ];
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtDate(s: string) {
+  return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function fmtDateTime(s: string) {
+  return new Date(s).toLocaleString("en-US", {
+    month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
 }
 
-function formatDateTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function SkeletonRow() {
   return (
-    <div className="card overflow-hidden animate-pulse">
-      <div className="flex items-center gap-4 px-6 py-4">
-        <div className="rounded-lg bg-gray-800 p-2">
-          <div className="h-4 w-4 rounded bg-gray-700" />
+    <div className="card animate-pulse overflow-hidden">
+      <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 24px" }}>
+        <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--color-bg-raised)" }} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ height: 14, width: 192, borderRadius: 4, background: "var(--color-border-strong)" }} />
+          <div style={{ height: 11, width: 128, borderRadius: 4, background: "var(--color-border)" }} />
         </div>
-        <div className="flex-1 space-y-2">
-          <div className="h-4 w-48 rounded bg-gray-700" />
-          <div className="h-3 w-32 rounded bg-gray-800" />
-        </div>
-        <div className="h-4 w-4 rounded bg-gray-700" />
       </div>
     </div>
   );
@@ -99,23 +85,14 @@ function SkeletonRow() {
 
 function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
+  const barColor = pct >= 70 ? "var(--color-teal)" : pct >= 50 ? "var(--color-warning)" : "var(--color-error)";
+  const textColor = pct >= 70 ? "var(--color-teal)" : pct >= 50 ? "var(--color-warning-text)" : "var(--color-error-text)";
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
-        <div
-          className={clsx(
-            "h-full rounded-full transition-all",
-            pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-red-500"
-          )}
-          style={{ width: `${pct}%` }}
-        />
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ flex: 1, height: 5, borderRadius: 9999, background: "var(--color-border-strong)", overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 9999, background: barColor, transition: "width 300ms ease" }} />
       </div>
-      <span
-        className={clsx(
-          "text-xs tabular-nums font-medium",
-          pct >= 70 ? "text-emerald-400" : pct >= 40 ? "text-amber-400" : "text-red-400"
-        )}
-      >
+      <span style={{ fontSize: 11, fontVariantNumeric: "tabular-nums", fontWeight: 500, color: textColor, minWidth: 28, textAlign: "right" }}>
         {pct}%
       </span>
     </div>
@@ -123,29 +100,33 @@ function ConfidenceBar({ value }: { value: number }) {
 }
 
 function StatusStepper({ status }: { status: string }) {
-  const currentIdx = STATUS_STEPS.indexOf(status);
+  const currentIdx = STATUS_STEPS.indexOf(status as StatusStep);
   return (
-    <div className="flex items-center gap-1">
-      {STATUS_STEPS.map((step, idx) => (
-        <div key={step} className="flex items-center gap-1">
-          <div
-            className={clsx(
-              "h-2 w-2 rounded-full",
-              idx < currentIdx
-                ? "bg-emerald-500"
-                : idx === currentIdx
-                  ? "bg-indigo-500"
-                  : "bg-gray-700"
+    <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+      {STATUS_STEPS.map((step, idx) => {
+        const isPast = idx < currentIdx;
+        const isCurrent = idx === currentIdx;
+        const dotColor = isPast ? "var(--color-teal)" : isCurrent ? "var(--color-brand-light)" : "var(--color-border-strong)";
+        const labelColor = isPast ? "var(--color-teal)" : isCurrent ? "var(--color-brand-light)" : "var(--color-text-muted)";
+        const lineColor = isPast ? "var(--color-teal)" : "var(--color-border)";
+        return (
+          <div key={step} style={{ display: "flex", alignItems: "center" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              <div style={{
+                width: 10, height: 10, borderRadius: "50%", background: dotColor,
+                boxShadow: isCurrent ? `0 0 0 3px rgba(45, 143, 206, 0.2)` : "none",
+                transition: "all 150ms ease",
+              }} />
+              <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: labelColor, whiteSpace: "nowrap" }}>
+                {step}
+              </span>
+            </div>
+            {idx < STATUS_STEPS.length - 1 && (
+              <div style={{ width: 32, height: 1, background: lineColor, margin: "0 4px", marginBottom: 16, transition: "background 150ms ease" }} />
             )}
-          />
-          {idx < STATUS_STEPS.length - 1 && (
-            <div
-              className={clsx("h-px w-4", idx < currentIdx ? "bg-emerald-500/50" : "bg-gray-700")}
-            />
-          )}
-        </div>
-      ))}
-      <span className="ml-2 text-xs text-gray-500 capitalize">{status}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -157,78 +138,74 @@ function ValidationPanel({ configId }: { configId: string }) {
   const validateMutation = useMutation({
     mutationFn: () => configurationsApi.validate(configId),
     onSuccess: (resp) => {
-      if (resp.data) {
-        setResult(resp.data);
-        setRan(true);
-      }
+      if (resp.data) { setResult(resp.data); setRan(true); }
     },
   });
 
   return (
-    <div className="mt-3 space-y-3">
-      <div className="flex items-center gap-2">
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <button
           type="button"
-          className="btn-secondary text-xs py-1.5 px-3"
+          className="btn-secondary"
+          style={{ fontSize: 12, padding: "6px 12px" }}
           onClick={() => validateMutation.mutate()}
           disabled={validateMutation.isPending}
         >
-          <BarChart3 className="h-3.5 w-3.5" />
-          {validateMutation.isPending ? "Validating..." : ran ? "Re-validate" : "Validate"}
+          <BarChart3 style={{ width: 13, height: 13 }} />
+          {validateMutation.isPending ? "Validating..." : ran ? "Re-validate" : "Run Validation"}
         </button>
         {ran && result && (
-          <span
-            className={clsx(
-              "text-xs font-medium",
-              result.is_valid ? "text-emerald-400" : "text-red-400"
-            )}
-          >
-            {result.is_valid ? "✓ Valid" : "✗ Invalid"}
+          <span style={{ fontSize: 12, fontWeight: 600, color: result.is_valid ? "var(--color-teal)" : "var(--color-error-text)" }}>
+            {result.is_valid ? "Valid" : "Invalid"}
           </span>
         )}
       </div>
+
       {ran && result && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-3 text-xs text-gray-500">
-            <span>Coverage</span>
-            <div className="flex-1 max-w-xs">
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 11, color: "var(--color-text-muted)", minWidth: 60 }}>Coverage</span>
+            <div style={{ flex: 1, maxWidth: 200 }}>
               <ConfidenceBar value={result.coverage_score} />
             </div>
           </div>
+
           {result.errors.length > 0 && (
-            <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
-              <p className="text-xs font-medium text-red-400 mb-1">
+            <div style={{ borderRadius: 6, border: "1px solid rgba(220,38,38,0.2)", background: "rgba(220,38,38,0.05)", padding: 12 }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-error-text)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Errors ({result.errors.length})
               </p>
               {result.errors.map((e) => (
-                <p key={e} className="text-xs text-red-300 flex items-start gap-1">
-                  <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                  {e}
-                </p>
+                <div key={e} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 4 }}>
+                  <AlertCircle style={{ width: 12, height: 12, color: "var(--color-error-text)", marginTop: 1, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: "var(--color-error-text)" }}>{e}</span>
+                </div>
               ))}
             </div>
           )}
+
           {result.warnings.length > 0 && (
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
-              <p className="text-xs font-medium text-amber-400 mb-1">
+            <div style={{ borderRadius: 6, border: "1px solid rgba(217,119,6,0.2)", background: "rgba(217,119,6,0.05)", padding: 12 }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-warning-text)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Warnings ({result.warnings.length})
               </p>
               {result.warnings.map((w) => (
-                <p key={w} className="text-xs text-amber-300">
-                  {w}
-                </p>
+                <p key={w} style={{ fontSize: 12, color: "var(--color-warning-text)", marginBottom: 2 }}>{w}</p>
               ))}
             </div>
           )}
+
           {result.missing_required_fields.length > 0 && (
-            <p className="text-xs text-gray-500">
-              Missing required: {result.missing_required_fields.join(", ")}
+            <p style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+              Missing required: <span style={{ fontFamily: "monospace", color: "var(--color-text-secondary)" }}>{result.missing_required_fields.join(", ")}</span>
             </p>
           )}
         </div>
       )}
+
       {validateMutation.isError && (
-        <p className="text-xs text-red-400">Validation failed. Check connection.</p>
+        <p style={{ fontSize: 12, color: "var(--color-error-text)" }}>Validation request failed. Check connection.</p>
       )}
     </div>
   );
@@ -244,72 +221,66 @@ function HistoryPanel({ configId, currentVersion }: { configId: string; currentV
   });
 
   const rollbackMutation = useMutation({
-    mutationFn: (targetVersion: number) => configurationsApi.rollback(configId, targetVersion),
+    mutationFn: (v: number) => configurationsApi.rollback(configId, v),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["configurations"] });
       queryClient.invalidateQueries({ queryKey: ["config-history", configId] });
       toast("Rolled back successfully.", "success");
     },
-    onError: () => {
-      toast("Rollback failed.", "error");
-    },
+    onError: () => { toast("Rollback failed.", "error"); },
   });
 
   const handleRollback = (entry: ConfigHistoryEntry) => {
-    if (
-      window.confirm(
-        `Roll back to version ${entry.version}? This will create a new version from that snapshot.`
-      )
-    ) {
+    if (window.confirm(`Roll back to version ${entry.version}? This creates a new version from that snapshot.`)) {
       rollbackMutation.mutate(entry.version);
     }
   };
 
-  if (isLoading) {
-    return <p className="text-xs text-gray-500 py-2">Loading history...</p>;
-  }
-
-  if (isError) {
-    return <p className="text-xs text-red-400 py-2">Failed to load history.</p>;
-  }
+  if (isLoading) return <p style={{ fontSize: 12, color: "var(--color-text-muted)", padding: "8px 0" }}>Loading history...</p>;
+  if (isError) return <p style={{ fontSize: 12, color: "var(--color-error-text)", padding: "8px 0" }}>Failed to load history.</p>;
 
   const entries: ConfigHistoryEntry[] = data?.data ?? [];
-
-  if (entries.length === 0) {
-    return <p className="text-xs text-gray-500 py-2">No history available.</p>;
-  }
+  if (entries.length === 0) return <p style={{ fontSize: 12, color: "var(--color-text-muted)", padding: "8px 0" }}>No history available.</p>;
 
   return (
-    <div className="space-y-2">
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {entries.map((entry) => (
         <div
           key={entry.version}
-          className="flex items-center gap-3 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2"
+          style={{
+            display: "flex", alignItems: "center", gap: 12,
+            borderRadius: 6, border: "1px solid var(--color-border)",
+            background: "var(--color-bg-base)", padding: "8px 12px",
+          }}
         >
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-semibold text-indigo-400">
+          <div style={{
+            width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+            background: "var(--color-brand-subtle)", display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 10, fontWeight: 700, color: "var(--color-brand-light)",
+          }}>
             v{entry.version}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-gray-300 capitalize">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", textTransform: "capitalize" }}>
               {entry.change_type.replace(/_/g, " ")}
             </p>
-            <p className="text-xs text-gray-500">
-              {entry.changed_by} &middot; {formatDateTime(entry.timestamp)}
+            <p style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+              {entry.changed_by} · {fmtDateTime(entry.timestamp)}
             </p>
           </div>
-          {entry.version !== currentVersion && (
+          {entry.version === currentVersion ? (
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-teal)" }}>current</span>
+          ) : (
             <button
               type="button"
-              className="btn-secondary text-xs py-1 px-2"
+              className="btn-secondary"
+              style={{ fontSize: 11, padding: "4px 8px" }}
               disabled={rollbackMutation.isPending}
               onClick={() => handleRollback(entry)}
             >
-              <RotateCcw className="h-3 w-3" />
+              <RotateCcw style={{ width: 11, height: 11 }} />
               Rollback
             </button>
-          )}
-          {entry.version === currentVersion && (
-            <span className="text-xs text-emerald-400 font-medium">current</span>
           )}
         </div>
       ))}
@@ -317,90 +288,96 @@ function HistoryPanel({ configId, currentVersion }: { configId: string; currentV
   );
 }
 
-function EditableFieldMappings({ cfg }: { cfg: Configuration }) {
+function MappingsTable({ cfg }: { cfg: Configuration }) {
   const { toast } = useToast();
-  const [mappings, setMappings] = useState<FieldMapping[]>(() =>
-    cfg.field_mappings.map((fm) => ({ ...fm }))
-  );
+  const [mappings, setMappings] = useState<FieldMapping[]>(() => cfg.field_mappings.map((fm) => ({ ...fm })));
   const [isDirty, setIsDirty] = useState(false);
 
   const updateTarget = (idx: number, value: string) => {
-    setMappings((prev) => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], target_field: value };
-      return next;
-    });
+    setMappings((prev) => { const next = [...prev]; next[idx] = { ...next[idx], target_field: value }; return next; });
     setIsDirty(true);
   };
 
   const updateTransform = (idx: number, value: string) => {
-    setMappings((prev) => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], transformation: value === "none" ? undefined : value };
-      return next;
-    });
+    setMappings((prev) => { const next = [...prev]; next[idx] = { ...next[idx], transformation: value === "none" ? undefined : value }; return next; });
     setIsDirty(true);
   };
 
-  const handleSave = () => {
-    // TODO: implement PATCH /api/v1/configurations/{id} once backend supports it
-    toast("Mappings saved locally (backend PATCH not yet implemented).", "success");
-    setIsDirty(false);
-  };
+  if (mappings.length === 0) {
+    return <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No field mappings configured.</p>;
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-medium text-gray-500">Field Mappings ({mappings.length})</p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)" }}>
+          {mappings.length} Mappings
+        </span>
         {isDirty && (
-          <button type="button" className="btn-primary text-xs py-1 px-2.5" onClick={handleSave}>
-            <Save className="h-3 w-3" />
-            Save Mappings
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ fontSize: 11, padding: "4px 10px" }}
+            onClick={() => { toast("Mappings saved (PATCH pending backend support).", "success"); setIsDirty(false); }}
+          >
+            <Save style={{ width: 11, height: 11 }} />
+            Save
           </button>
         )}
       </div>
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
-        <table className="w-full text-xs">
+      <div style={{ overflowX: "auto", borderRadius: 6, border: "1px solid var(--color-border)" }}>
+        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
           <thead>
-            <tr className="border-b border-gray-800 bg-gray-900/60">
-              <th className="px-3 py-2 text-left font-medium text-gray-500">Source</th>
-              <th className="px-3 py-2 text-center text-gray-700">→</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-500">Target</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-500">Confidence</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-500">Transform</th>
+            <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-bg-base)" }}>
+              {["Source", "→", "Target", "Confidence", "Transform"].map((h) => (
+                <th key={h} style={{ padding: "8px 12px", textAlign: h === "→" ? "center" : "left", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)" }}>
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800/60">
+          <tbody>
             {mappings.map((fm, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: field mappings lack stable id
-              <tr key={i} className="hover:bg-gray-800/30">
-                <td className="px-3 py-2 font-mono text-gray-300">{fm.source_field}</td>
-                <td className="px-3 py-2 text-center text-gray-700">
-                  <ChevronRight className="h-3 w-3 mx-auto" />
+              // biome-ignore lint/suspicious/noArrayIndexKey: field mappings have no stable id
+              <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                <td style={{ padding: "8px 12px" }}>
+                  <span className="mono" style={{ color: "var(--color-text-primary)", fontSize: 12 }}>{fm.source_field}</span>
                 </td>
-                <td className="px-3 py-2">
+                <td style={{ padding: "8px 12px", textAlign: "center", color: "var(--color-text-muted)" }}>
+                  <ChevronRight style={{ width: 12, height: 12, margin: "0 auto" }} />
+                </td>
+                <td style={{ padding: "8px 12px", minWidth: 160 }}>
                   <input
                     type="text"
                     value={fm.target_field}
-                    placeholder="Enter target field..."
+                    placeholder="target field..."
                     onChange={(e) => updateTarget(i, e.target.value)}
-                    className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-gray-300 placeholder:text-gray-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    style={{
+                      width: "100%", borderRadius: 4, border: "1px solid var(--color-border-strong)",
+                      background: "var(--color-bg-raised)", padding: "4px 8px",
+                      fontFamily: "monospace", fontSize: 12, color: "var(--color-text-primary)",
+                      outline: "none", boxSizing: "border-box",
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = "var(--color-brand-light)"; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = "var(--color-border-strong)"; }}
                   />
                 </td>
-                <td className="px-3 py-2 w-32">
+                <td style={{ padding: "8px 12px", minWidth: 120 }}>
                   <ConfidenceBar value={fm.confidence} />
                 </td>
-                <td className="px-3 py-2">
+                <td style={{ padding: "8px 12px" }}>
                   <select
                     value={fm.transformation ?? "none"}
                     onChange={(e) => updateTransform(i, e.target.value)}
-                    className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-300 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    style={{
+                      borderRadius: 4, border: "1px solid var(--color-border-strong)",
+                      background: "var(--color-bg-raised)", padding: "4px 8px",
+                      fontSize: 12, color: "var(--color-text-primary)", outline: "none",
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = "var(--color-brand-light)"; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = "var(--color-border-strong)"; }}
                   >
-                    {TRANSFORM_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
+                    {TRANSFORM_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
                 </td>
               </tr>
@@ -412,9 +389,10 @@ function EditableFieldMappings({ cfg }: { cfg: Configuration }) {
   );
 }
 
+type DetailTab = "mappings" | "history" | "validation";
+
 function ConfigDetail({ cfg }: { cfg: Configuration }) {
-  const [showRaw, setShowRaw] = useState(false);
-  const [activeTab, setActiveTab] = useState<"mappings" | "history">("mappings");
+  const [activeTab, setActiveTab] = useState<DetailTab>("mappings");
   const { toast } = useToast();
 
   const handleExport = async (format: "json" | "yaml") => {
@@ -433,152 +411,223 @@ function ConfigDetail({ cfg }: { cfg: Configuration }) {
     }
   };
 
+  const tabs: { id: DetailTab; label: string; icon: React.ElementType }[] = [
+    { id: "mappings", label: "Mappings", icon: Settings },
+    { id: "history", label: "History", icon: History },
+    { id: "validation", label: "Validation", icon: BarChart3 },
+  ];
+
   return (
-    <div className="border-t border-gray-800 bg-gray-900/40 px-6 py-4 space-y-4">
-      {/* Status stepper */}
+    <div className="animate-fade-in" style={{ borderTop: "1px solid var(--color-border)", background: "var(--color-bg-base)", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* Status pipeline */}
       <div>
-        <p className="text-xs font-medium text-gray-500 mb-2">Progress</p>
+        <p style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 12 }}>
+          Lifecycle
+        </p>
         <StatusStepper status={cfg.status} />
       </div>
 
-      {/* Export buttons */}
+      {/* Export */}
       <div>
-        <p className="text-xs font-medium text-gray-500 mb-2">Export</p>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="btn-secondary text-xs py-1.5 px-3"
-            onClick={() => handleExport("json")}
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export JSON
+        <p style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 8 }}>
+          Export
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn-secondary" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => handleExport("json")}>
+            <Download style={{ width: 13, height: 13 }} />
+            JSON
           </button>
-          <button
-            type="button"
-            className="btn-secondary text-xs py-1.5 px-3"
-            onClick={() => handleExport("yaml")}
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export YAML
+          <button type="button" className="btn-secondary" style={{ fontSize: 12, padding: "5px 12px" }} onClick={() => handleExport("yaml")}>
+            <Download style={{ width: 13, height: 13 }} />
+            YAML
           </button>
         </div>
       </div>
 
-      {/* Tabs: Mappings / History */}
+      {/* Tabs */}
       <div>
-        <div className="flex gap-1 border-b border-gray-800 mb-3">
-          <button
-            type="button"
-            className={clsx(
-              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
-              activeTab === "mappings"
-                ? "border-indigo-500 text-indigo-400"
-                : "border-transparent text-gray-500 hover:text-gray-300"
-            )}
-            onClick={() => setActiveTab("mappings")}
-          >
-            <Settings className="h-3 w-3" />
-            Mappings
-          </button>
-          <button
-            type="button"
-            className={clsx(
-              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
-              activeTab === "history"
-                ? "border-indigo-500 text-indigo-400"
-                : "border-transparent text-gray-500 hover:text-gray-300"
-            )}
-            onClick={() => setActiveTab("history")}
-          >
-            <History className="h-3 w-3" />
-            History
-          </button>
+        <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)", marginBottom: 16, gap: 0 }}>
+          {tabs.map(({ id, label, icon: Icon }) => {
+            const isActive = activeTab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveTab(id)}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "8px 14px", fontSize: 12, fontWeight: 500,
+                  borderBottom: isActive ? "2px solid var(--color-brand-light)" : "2px solid transparent",
+                  marginBottom: -1, color: isActive ? "var(--color-brand-light)" : "var(--color-text-muted)",
+                  background: "transparent", cursor: "pointer", transition: "color 120ms ease",
+                }}
+              >
+                <Icon style={{ width: 12, height: 12 }} />
+                {label}
+              </button>
+            );
+          })}
         </div>
 
-        {activeTab === "mappings" && cfg.field_mappings.length > 0 && (
-          <EditableFieldMappings cfg={cfg} />
-        )}
-        {activeTab === "mappings" && cfg.field_mappings.length === 0 && (
-          <p className="text-xs text-gray-500">No field mappings configured.</p>
-        )}
+        {activeTab === "mappings" && <MappingsTable cfg={cfg} />}
         {activeTab === "history" && <HistoryPanel configId={cfg.id} currentVersion={cfg.version} />}
-      </div>
-
-      {/* Validate section */}
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">Validation</p>
-        <ValidationPanel configId={cfg.id} />
-      </div>
-
-      {/* Raw JSON toggle */}
-      <div>
-        <button
-          type="button"
-          className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1"
-          onClick={() => setShowRaw(!showRaw)}
-        >
-          <ChevronDown className={clsx("h-3 w-3 transition-transform", showRaw && "rotate-180")} />
-          {showRaw ? "Hide" : "Show"} raw JSON
-        </button>
-        {showRaw && (
-          <pre className="mt-2 rounded-lg bg-gray-950 p-4 text-xs text-gray-300 overflow-x-auto leading-relaxed">
-            {JSON.stringify(cfg, null, 2)}
-          </pre>
-        )}
+        {activeTab === "validation" && <ValidationPanel configId={cfg.id} />}
       </div>
 
       {/* Meta */}
-      <div className="text-xs text-gray-500">
-        Adapter version: <code className="text-gray-400">{cfg.adapter_version_id}</code> &middot;
-        Created {formatDate(cfg.created_at)}
-      </div>
+      <p style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+        Adapter version: <code style={{ fontFamily: "monospace", color: "var(--color-text-secondary)" }}>{cfg.adapter_version_id}</code>
+        {" · "}Created {fmtDate(cfg.created_at)}
+      </p>
     </div>
   );
 }
 
-export default function Configurations() {
-  const queryClient = useQueryClient();
+// ── Generate Form ─────────────────────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: "100%", borderRadius: 6, border: "1px solid var(--color-border-strong)",
+  background: "var(--color-bg-raised)", padding: "8px 12px",
+  fontSize: 13, color: "var(--color-text-primary)", outline: "none", boxSizing: "border-box",
+};
+
+function GenerateForm({ onDone }: { onDone: () => void }) {
   const { toast } = useToast();
-  const [showForm, setShowForm] = useState(false);
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [documentId, setDocumentId] = useState("");
   const [selectedAdapterId, setSelectedAdapterId] = useState("");
   const [adapterVersionId, setAdapterVersionId] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["configurations"],
-    queryFn: () => configurationsApi.list(),
-  });
+  const { data: docsData } = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
+  const { data: adaptersData } = useQuery({ queryKey: ["adapters"], queryFn: () => adaptersApi.list() });
 
-  const { data: docsData } = useQuery({
-    queryKey: ["documents"],
-    queryFn: () => documentsApi.list(),
-    enabled: showForm,
-  });
-
-  const { data: adaptersData } = useQuery({
-    queryKey: ["adapters"],
-    queryFn: () => adaptersApi.list(),
-    enabled: showForm,
-  });
+  const docs = docsData?.data ?? [];
+  const adapters: Adapter[] = adaptersData?.data?.adapters ?? [];
+  const selectedAdapter = adapters.find((a) => a.id === selectedAdapterId);
 
   const generateMutation = useMutation({
     mutationFn: configurationsApi.generate,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["configurations"] });
-      setShowForm(false);
-      setName("");
-      setDocumentId("");
-      setSelectedAdapterId("");
-      setAdapterVersionId("");
-      setGenerateError(null);
-      toast("Configuration generated successfully.", "success");
+      toast("Configuration generated.", "success");
+      onDone();
     },
-    onError: (err: Error) => {
-      setGenerateError(err.message ?? "Failed to generate configuration.");
-    },
+    onError: (err: Error) => { setError(err.message ?? "Generation failed."); },
+  });
+
+  const handleAdapterChange = (id: string) => {
+    setSelectedAdapterId(id);
+    setAdapterVersionId("");
+    const adapter = adapters.find((a) => a.id === id);
+    if (adapter && !name) setName(`${adapter.name} Integration`);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !documentId || !adapterVersionId) return;
+    setError(null);
+    generateMutation.mutate({ name: name.trim(), document_id: documentId, adapter_version_id: adapterVersionId, auto_map: true });
+  };
+
+  const focusStyle = (e: React.FocusEvent<HTMLSelectElement | HTMLInputElement>) => {
+    e.currentTarget.style.borderColor = "var(--color-brand-light)";
+  };
+  const blurStyle = (e: React.FocusEvent<HTMLSelectElement | HTMLInputElement>) => {
+    e.currentTarget.style.borderColor = "var(--color-border-strong)";
+  };
+
+  return (
+    <div className="card animate-fade-in" style={{ padding: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <Sparkles style={{ width: 16, height: 16, color: "var(--color-brand-light)" }} />
+        <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-primary)" }}>Generate Configuration</h2>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+            Document
+          </label>
+          <select value={documentId} onChange={(e) => setDocumentId(e.target.value)} style={inputStyle} onFocus={focusStyle} onBlur={blurStyle}>
+            <option value="">Select document...</option>
+            {docs.map((doc) => (
+              <option key={doc.id} value={doc.id}>{doc.filename} ({doc.status})</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+            Adapter
+          </label>
+          <select value={selectedAdapterId} onChange={(e) => handleAdapterChange(e.target.value)} style={inputStyle} onFocus={focusStyle} onBlur={blurStyle}>
+            <option value="">Select adapter...</option>
+            {adapters.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+            Version
+          </label>
+          <select
+            value={adapterVersionId}
+            onChange={(e) => setAdapterVersionId(e.target.value)}
+            disabled={!selectedAdapter}
+            style={{ ...inputStyle, opacity: selectedAdapter ? 1 : 0.5 }}
+            onFocus={focusStyle} onBlur={blurStyle}
+          >
+            <option value="">{selectedAdapter ? "Select version..." : "Select adapter first"}</option>
+            {selectedAdapter?.versions.map((v) => (
+              <option key={v.id} value={v.id}>v{v.version} — {v.status}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+            Name
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Credit Bureau Integration"
+            style={inputStyle}
+            onFocus={focusStyle} onBlur={blurStyle}
+          />
+        </div>
+
+        <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          {error && (
+            <div style={{ flex: 1, borderRadius: 6, border: "1px solid rgba(220,38,38,0.2)", background: "rgba(220,38,38,0.05)", padding: "8px 12px", fontSize: 12, color: "var(--color-error-text)" }}>
+              {error}
+            </div>
+          )}
+          <button type="submit" className="btn-primary" disabled={!name.trim() || !documentId || !adapterVersionId || generateMutation.isPending}>
+            <Sparkles style={{ width: 14, height: 14 }} />
+            {generateMutation.isPending ? "Generating..." : "Generate"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function Configurations() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["configurations"],
+    queryFn: () => configurationsApi.list(),
   });
 
   const transitionMutation = useMutation({
@@ -586,268 +635,122 @@ export default function Configurations() {
       configurationsApi.transition(id, targetState),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["configurations"] });
-      toast("Configuration state updated.", "success");
+      toast("State updated.", "success");
     },
-    onError: () => {
-      toast("Failed to transition state.", "error");
-    },
+    onError: () => { toast("Transition failed.", "error"); },
   });
 
   const configs: Configuration[] = data?.data ?? [];
-  const docs = docsData?.data ?? [];
-  const adapters: Adapter[] = adaptersData?.data?.adapters ?? [];
-
-  const selectedAdapter = adapters.find((a) => a.id === selectedAdapterId);
-
-  const handleAdapterChange = (adapterId: string) => {
-    setSelectedAdapterId(adapterId);
-    setAdapterVersionId("");
-    const adapter = adapters.find((a) => a.id === adapterId);
-    if (adapter && !name) {
-      setName(`${adapter.name} Integration`);
-    }
-  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
-          <h1 className="text-2xl font-bold text-white">Configurations</h1>
-          <p className="mt-1 text-sm text-gray-400">
-            Manage and generate integration configurations
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--color-text-primary)", marginBottom: 4 }}>Configurations</h1>
+          <p style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+            Generate and manage integration configurations
           </p>
         </div>
         <button
           type="button"
-          className="btn-primary"
-          onClick={() => {
-            setShowForm(!showForm);
-            setGenerateError(null);
-          }}
+          className={showForm ? "btn-secondary" : "btn-primary"}
+          onClick={() => setShowForm((v) => !v)}
         >
-          {showForm ? (
-            "Cancel"
-          ) : (
-            <>
-              <Plus className="h-4 w-4" /> Generate Config
-            </>
-          )}
+          {showForm ? "Cancel" : <><Plus style={{ width: 15, height: 15 }} /> Generate Config</>}
         </button>
       </div>
 
+      {/* Error banner */}
       {error && (
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-400">
+        <div style={{ borderRadius: 8, border: "1px solid rgba(217,119,6,0.2)", background: "rgba(217,119,6,0.05)", padding: "12px 16px", fontSize: 13, color: "var(--color-warning-text)" }}>
           Failed to load configurations. Check your connection and try again.
         </div>
       )}
 
-      {/* Generate form */}
-      {showForm && (
-        <div className="card p-6">
-          <div className="mb-4 flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-indigo-400" />
-            <h2 className="font-semibold text-white">Generate New Configuration</h2>
-          </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (name.trim() && documentId.trim() && adapterVersionId.trim()) {
-                setGenerateError(null);
-                generateMutation.mutate({
-                  name: name.trim(),
-                  document_id: documentId.trim(),
-                  adapter_version_id: adapterVersionId.trim(),
-                });
-              }
-            }}
-            className="grid gap-4 sm:grid-cols-2"
-          >
-            {/* Document dropdown */}
-            <div>
-              <label htmlFor="cfg-doc" className="mb-1.5 block text-xs font-medium text-gray-400">
-                Document
-              </label>
-              <select
-                id="cfg-doc"
-                value={documentId}
-                onChange={(e) => setDocumentId(e.target.value)}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <option value="">Select document...</option>
-                {docs.map((doc) => (
-                  <option key={doc.id} value={doc.id}>
-                    {doc.filename} ({doc.status})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Adapter dropdown */}
-            <div>
-              <label
-                htmlFor="cfg-adapter-name"
-                className="mb-1.5 block text-xs font-medium text-gray-400"
-              >
-                Adapter
-              </label>
-              <select
-                id="cfg-adapter-name"
-                value={selectedAdapterId}
-                onChange={(e) => handleAdapterChange(e.target.value)}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <option value="">Select adapter...</option>
-                {adapters.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Version dropdown */}
-            <div>
-              <label
-                htmlFor="cfg-adapter-version"
-                className="mb-1.5 block text-xs font-medium text-gray-400"
-              >
-                Adapter Version
-              </label>
-              <select
-                id="cfg-adapter-version"
-                value={adapterVersionId}
-                onChange={(e) => setAdapterVersionId(e.target.value)}
-                disabled={!selectedAdapter}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-              >
-                <option value="">
-                  {selectedAdapter ? "Select version..." : "Select adapter first"}
-                </option>
-                {selectedAdapter?.versions.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    v{v.version} — {v.status}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Name input */}
-            <div>
-              <label htmlFor="cfg-name" className="mb-1.5 block text-xs font-medium text-gray-400">
-                Configuration Name
-              </label>
-              <input
-                id="cfg-name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Credit Bureau Integration"
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
-            </div>
-
-            <div className="sm:col-span-2 flex justify-end">
-              <button
-                type="submit"
-                className="btn-primary"
-                disabled={
-                  !name.trim() ||
-                  !documentId.trim() ||
-                  !adapterVersionId.trim() ||
-                  generateMutation.isPending
-                }
-              >
-                <Sparkles className="h-4 w-4" />
-                {generateMutation.isPending ? "Generating..." : "Generate"}
-              </button>
-            </div>
-          </form>
-          {generateError && (
-            <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-400">
-              {generateError}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Generate form slide-in */}
+      {showForm && <GenerateForm onDone={() => setShowForm(false)} />}
 
       {/* Config list */}
-      <div className="space-y-3">
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {isLoading ? (
-          <>
-            <SkeletonRow />
-            <SkeletonRow />
-            <SkeletonRow />
-          </>
+          <><SkeletonRow /><SkeletonRow /><SkeletonRow /></>
         ) : configs.length === 0 && !error ? (
-          <div className="card flex flex-col items-center justify-center py-16 text-center">
-            <Settings className="mb-3 h-10 w-10 text-gray-600" />
-            <p className="text-sm font-medium text-gray-400">No configurations yet</p>
-            <p className="mt-1 text-xs text-gray-600">
-              Click "Generate Config" to create your first integration configuration.
-            </p>
+          <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "64px 24px", textAlign: "center" }}>
+            <Settings style={{ width: 40, height: 40, color: "var(--color-text-muted)", marginBottom: 12 }} />
+            <p style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: 4 }}>No configurations yet</p>
+            <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Click "Generate Config" to create your first integration configuration.</p>
           </div>
         ) : (
           configs.map((cfg) => {
-            const st = statusConfig[cfg.status] ?? { label: cfg.status, cls: "badge-gray" };
+            const st = STATUS_CONFIG[cfg.status] ?? { label: cfg.status, cls: "badge-gray" };
             const isExpanded = expandedId === cfg.id;
             const transitions = TRANSITION_BUTTONS[cfg.status] ?? [];
 
             return (
-              <div key={cfg.id} className="card overflow-hidden">
+              <div key={cfg.id} className="card" style={{ overflow: "hidden" }}>
+                {/* Row header */}
                 <button
                   type="button"
-                  className="flex w-full items-center gap-4 px-6 py-4 text-left transition-colors hover:bg-gray-800/30"
+                  style={{
+                    display: "flex", width: "100%", alignItems: "center", gap: 16,
+                    padding: "14px 20px", textAlign: "left", background: "transparent", cursor: "pointer",
+                    transition: "background 100ms ease",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-raised)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                   onClick={() => setExpandedId(isExpanded ? null : cfg.id)}
                 >
-                  <div className="rounded-lg bg-gray-800 p-2">
-                    <Settings className="h-4 w-4 text-gray-400" />
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--color-bg-raised)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Settings style={{ width: 16, height: 16, color: "var(--color-text-muted)" }} />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-medium text-white">{cfg.name}</h3>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-primary)" }}>{cfg.name}</span>
                       <span className={st.cls}>{st.label}</span>
                     </div>
-                    <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
-                      <span className="font-mono">v{cfg.version}</span>
-                      <span>&middot;</span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        Updated {formatDate(cfg.updated_at)}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "var(--color-text-muted)" }}>
+                      <span className="mono" style={{ fontSize: 12 }}>v{cfg.version}</span>
+                      <span>·</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <Clock style={{ width: 11, height: 11 }} />
+                        {fmtDate(cfg.updated_at)}
                       </span>
-                      <span>&middot;</span>
+                      <span>·</span>
                       <span>{cfg.field_mappings.length} mappings</span>
                     </div>
                   </div>
-                  {/* Transition buttons */}
+
+                  {/* Lifecycle transition buttons */}
                   {transitions.length > 0 && (
-                    <div className="flex gap-2">
+                    <div style={{ display: "flex", gap: 8 }} onClick={(e) => e.stopPropagation()}>
                       {transitions.map((t) => {
                         const TIcon = t.icon;
                         return (
                           <button
                             key={t.targetState}
                             type="button"
-                            className="btn-secondary text-xs py-1 px-2.5"
+                            className="btn-secondary"
+                            style={{ fontSize: 11, padding: "5px 10px" }}
                             disabled={transitionMutation.isPending}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              transitionMutation.mutate({ id: cfg.id, targetState: t.targetState });
-                            }}
+                            onClick={() => transitionMutation.mutate({ id: cfg.id, targetState: t.targetState })}
                           >
-                            <TIcon className="h-3.5 w-3.5" />
+                            <TIcon style={{ width: 12, height: 12 }} />
                             {t.label}
                           </button>
                         );
                       })}
                     </div>
                   )}
-                  <ChevronDown
-                    className={clsx(
-                      "h-4 w-4 text-gray-500 transition-transform shrink-0",
-                      isExpanded && "rotate-180"
-                    )}
-                  />
+
+                  <ChevronDown style={{
+                    width: 15, height: 15, color: "var(--color-text-muted)", flexShrink: 0,
+                    transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 150ms ease",
+                  }} />
                 </button>
+
+                {/* Expanded detail */}
                 {isExpanded && <ConfigDetail cfg={cfg} />}
               </div>
             );

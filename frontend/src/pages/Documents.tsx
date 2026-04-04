@@ -2,12 +2,8 @@ import { useToast } from "@/components/Toast";
 import { documentsApi } from "@/lib/api";
 import type { Document } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import clsx from "clsx";
 import {
   AlertCircle,
-  CheckCircle2,
-  ChevronRight,
-  Clock,
   FileCode,
   FileSpreadsheet,
   FileText,
@@ -16,6 +12,7 @@ import {
   Loader2,
   Search,
   Shield,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -23,35 +20,42 @@ import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import type { FileRejection } from "react-dropzone";
 
-const statusConfig: Record<
-  string,
-  { label: string; icon: React.ComponentType<{ className?: string }>; cls: string }
-> = {
-  pending: { label: "Pending", icon: Clock, cls: "badge-yellow" },
-  processing: { label: "Processing", icon: Loader2, cls: "badge-blue" },
-  parsing: { label: "Parsing", icon: Loader2, cls: "badge-blue" },
-  completed: { label: "Completed", icon: CheckCircle2, cls: "badge-green" },
-  done: { label: "Done", icon: CheckCircle2, cls: "badge-green" },
-  parsed: { label: "Parsed", icon: CheckCircle2, cls: "badge-green" },
-  failed: { label: "Failed", icon: AlertCircle, cls: "badge-red" },
+// ── Types ────────────────────────────────────────────────────────────────────
+
+type ParsedResult = {
+  title?: string;
+  summary?: string;
+  confidence_score?: number;
+  endpoints?: Array<{ path: string; method: string; description?: string; summary?: string }>;
+  fields?: Array<{
+    name: string;
+    data_type?: string;
+    is_required?: boolean;
+    source_section?: string;
+    description?: string;
+  }>;
+  auth_requirements?: Array<{
+    auth_type: string;
+    details?: { name?: string; scheme?: string; in?: string };
+  }>;
+  services_identified?: string[];
+  raw_entities?: string[];
+  parse_errors?: string[];
 };
 
-function methodBadgeCls(method: string): string {
-  if (method === "GET") return "bg-emerald-500/15 text-emerald-400";
-  if (method === "POST") return "bg-blue-500/15 text-blue-400";
-  if (method === "PUT" || method === "PATCH") return "bg-amber-500/15 text-amber-400";
-  if (method === "DELETE") return "bg-red-500/15 text-red-400";
-  return "bg-gray-500/15 text-gray-400";
-}
+type DocumentDetail = Document & { parsed_result?: ParsedResult };
+type DetailTab = "summary" | "endpoints" | "fields" | "auth" | "raw";
 
-function fileIcon(fileType: string) {
-  if (fileType === "json" || fileType === "yaml") return FileCode;
-  if (fileType === "xlsx" || fileType === "csv") return FileSpreadsheet;
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function fileIcon(ft: string) {
+  if (ft === "json" || ft === "yaml" || ft === "yml") return FileCode;
+  if (ft === "xlsx" || ft === "csv") return FileSpreadsheet;
   return FileText;
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString("en-US", {
+function formatDate(d: string) {
+  return new Date(d).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -59,45 +63,67 @@ function formatDate(dateStr: string): string {
   });
 }
 
-type ParsedResult = {
-  endpoints?: Array<{ path: string; method: string; description?: string; summary?: string }>;
-  fields?: Array<{
-    name: string;
-    data_type?: string;
-    is_required?: boolean;
-    description?: string;
-    sample_value?: string;
-    source_section?: string;
-  }>;
-  auth_requirements?: Array<{
-    auth_type: string;
-    details?: { name?: string; scheme?: string; in?: string };
-  }>;
-  title?: string;
-  summary?: string;
-  services_identified?: string[];
-  confidence_score?: number;
-  sections?: Record<string, string>;
-  raw_entities?: string[];
-  parse_errors?: string[];
+const STATUS_DOT: Record<string, { color: string; label: string; pulse?: boolean }> = {
+  parsed: { color: "var(--color-teal)", label: "Parsed" },
+  completed: { color: "var(--color-teal)", label: "Completed" },
+  done: { color: "var(--color-teal)", label: "Done" },
+  parsing: { color: "#fbbf24", label: "Parsing", pulse: true },
+  processing: { color: "#fbbf24", label: "Processing", pulse: true },
+  pending: { color: "#fbbf24", label: "Pending" },
+  uploaded: { color: "#64748b", label: "Uploaded" },
+  failed: { color: "var(--color-error)", label: "Failed" },
 };
 
-type DocumentDetail = Document & {
-  parsed_result?: ParsedResult;
+const DOC_TYPE_BADGE: Record<string, string> = {
+  api_spec: "badge-blue",
+  brd: "badge-teal",
 };
 
-type DetailTab = "endpoints" | "fields" | "auth" | "summary" | "raw";
+const METHOD_COLOR: Record<string, { bg: string; text: string }> = {
+  GET: { bg: "rgba(15,184,154,0.12)", text: "#0fb89a" },
+  POST: { bg: "rgba(29,111,164,0.15)", text: "#60a5fa" },
+  PUT: { bg: "rgba(217,119,6,0.12)", text: "#fbbf24" },
+  PATCH: { bg: "rgba(217,119,6,0.12)", text: "#fbbf24" },
+  DELETE: { bg: "rgba(220,38,38,0.12)", text: "#f87171" },
+};
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-tab modal with conditional rendering
-function DetailModal({
-  doc,
-  onClose,
-}: {
-  doc: Document;
-  onClose: () => void;
-}) {
-  const [activeTab, setActiveTab] = useState<DetailTab>("summary");
-  const [showRaw, setShowRaw] = useState(false);
+// ── StatusDot ─────────────────────────────────────────────────────────────────
+
+function StatusDot({ status }: { status: string }) {
+  const cfg = STATUS_DOT[status] ?? { color: "#64748b", label: status };
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.375rem",
+        fontSize: "0.75rem",
+        fontWeight: 500,
+        color: "var(--color-text-secondary)",
+      }}
+    >
+      <span
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          backgroundColor: cfg.color,
+          flexShrink: 0,
+          boxShadow: cfg.pulse ? `0 0 0 0 ${cfg.color}` : undefined,
+          animation: cfg.pulse ? "statusPulse 1.5s ease-in-out infinite" : undefined,
+        }}
+      />
+      {cfg.label}
+      <style>{"@keyframes statusPulse{0%,100%{opacity:1}50%{opacity:.4}}"}</style>
+    </span>
+  );
+}
+
+// ── DetailModal ───────────────────────────────────────────────────────────────
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-tab modal
+function DetailModal({ doc, onClose }: { doc: Document; onClose: () => void }) {
+  const [tab, setTab] = useState<DetailTab>("summary");
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["document", doc.id],
@@ -106,338 +132,549 @@ function DetailModal({
 
   const detail = data?.data as DocumentDetail | null;
   const parsed = detail?.parsed_result;
+  const FileIcon = fileIcon(doc.file_type);
 
-  const tabs: { id: DetailTab; label: string; icon: React.ElementType }[] = [
-    { id: "summary", label: "Summary", icon: FileText },
+  const tabs: { id: DetailTab; label: string; Icon: React.ElementType }[] = [
+    { id: "summary", label: "Summary", Icon: FileText },
     {
       id: "endpoints",
       label: `Endpoints${parsed?.endpoints?.length ? ` (${parsed.endpoints.length})` : ""}`,
-      icon: Link2,
+      Icon: Link2,
     },
     {
       id: "fields",
       label: `Fields${parsed?.fields?.length ? ` (${parsed.fields.length})` : ""}`,
-      icon: Layers,
+      Icon: Layers,
     },
-    { id: "auth", label: "Auth", icon: Shield },
+    { id: "auth", label: "Auth", Icon: Shield },
+    { id: "raw", label: "Raw JSON", Icon: FileCode },
   ];
 
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: modal overlay, keyboard handled via close button
+    // biome-ignore lint/a11y/useKeyWithClickEvents: overlay dismiss, keyboard handled by X button
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.65)" }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative z-10 w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-gray-800 bg-gray-950 shadow-2xl">
+      <div
+        className="animate-fade-in relative z-10 flex w-full max-w-3xl flex-col rounded-xl shadow-2xl"
+        style={{
+          maxHeight: "86vh",
+          background: "var(--color-bg-elevated)",
+          border: "1px solid var(--color-border-strong)",
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center gap-3 border-b border-gray-800 px-6 py-4">
-          <div className="rounded-lg bg-gray-800 p-2">
-            {(() => {
-              const IconFile = fileIcon(doc.file_type);
-              return <IconFile className="h-4 w-4 text-gray-400" />;
-            })()}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.75rem",
+            borderBottom: "1px solid var(--color-border)",
+            padding: "1rem 1.25rem",
+          }}
+        >
+          <div
+            style={{
+              background: "var(--color-bg-raised)",
+              borderRadius: "0.5rem",
+              padding: "0.5rem",
+              flexShrink: 0,
+            }}
+          >
+            <FileIcon style={{ width: 16, height: 16, color: "var(--color-text-muted)" }} />
           </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate font-semibold text-white">{doc.filename}</h2>
-            <p className="text-xs text-gray-500">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <p
+              className="mono"
+              style={{
+                color: "var(--color-text-primary)",
+                fontWeight: 600,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {doc.filename}
+            </p>
+            <p style={{ fontSize: "0.6875rem", color: "var(--color-text-muted)", marginTop: 2 }}>
               {doc.file_type.toUpperCase()} &middot; {formatDate(doc.created_at)}
             </p>
           </div>
-          {(() => {
-            const st = statusConfig[doc.status] ?? {
-              label: doc.status,
-              icon: Clock,
-              cls: "badge-gray",
-            };
-            const StatusIcon = st.icon;
-            return (
-              <span className={st.cls}>
-                <StatusIcon
-                  className={clsx("mr-1 h-3 w-3", doc.status === "processing" && "animate-spin")}
-                />
-                {st.label}
-              </span>
-            );
-          })()}
+          <StatusDot status={doc.status} />
           <button
             type="button"
             onClick={onClose}
-            className="ml-2 text-gray-500 hover:text-gray-300 transition-colors"
             aria-label="Close"
+            style={{
+              color: "var(--color-text-muted)",
+              marginLeft: "0.5rem",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 4,
+            }}
           >
-            <X className="h-5 w-5" />
+            <X style={{ width: 18, height: 18 }} />
           </button>
         </div>
 
-        {isLoading ? (
-          <div className="flex flex-1 items-center justify-center p-12">
-            <Loader2 className="h-6 w-6 animate-spin text-indigo-400" />
-          </div>
-        ) : error || !parsed ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-12 text-center">
-            <AlertCircle className="h-8 w-8 text-gray-600" />
-            <p className="text-sm text-gray-400">
-              {error
-                ? "Failed to load document details."
-                : "No parsed data available for this document."}
-            </p>
-            <p className="text-xs text-gray-600">
-              {doc.status === "pending" || doc.status === "processing"
-                ? "Document is still being processed. Check back shortly."
-                : "Upload a supported file type to extract structured data."}
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Tabs */}
-            <div className="flex gap-1 border-b border-gray-800 px-4 pt-2">
-              {tabs.map((tab) => {
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveTab(tab.id);
-                      setShowRaw(false);
-                    }}
-                    className={clsx(
-                      "flex items-center gap-1.5 rounded-t px-3 py-2 text-xs font-medium transition-colors",
-                      activeTab === tab.id && !showRaw
-                        ? "border-b-2 border-indigo-500 text-indigo-300"
-                        : "text-gray-500 hover:text-gray-300"
-                    )}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {tab.label}
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => setShowRaw(!showRaw)}
-                className={clsx(
-                  "ml-auto flex items-center gap-1.5 rounded-t px-3 py-2 text-xs font-medium transition-colors",
-                  showRaw
-                    ? "border-b-2 border-indigo-500 text-indigo-300"
-                    : "text-gray-500 hover:text-gray-300"
-                )}
-              >
-                <FileCode className="h-3.5 w-3.5" />
-                Raw JSON
-              </button>
-            </div>
+        {/* Tabs */}
+        <div
+          style={{
+            display: "flex",
+            borderBottom: "1px solid var(--color-border)",
+            padding: "0 1rem",
+            gap: "0.25rem",
+            flexShrink: 0,
+          }}
+        >
+          {tabs.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.375rem",
+                padding: "0.5rem 0.75rem",
+                fontSize: "0.6875rem",
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                border: "none",
+                borderBottom:
+                  tab === id ? "2px solid var(--color-brand-light)" : "2px solid transparent",
+                background: "none",
+                color: tab === id ? "var(--color-brand-light)" : "var(--color-text-muted)",
+                cursor: "pointer",
+                transition: "color 120ms, border-color 120ms",
+              }}
+            >
+              <Icon style={{ width: 12, height: 12 }} />
+              {label}
+            </button>
+          ))}
+        </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-auto p-5">
-              {showRaw ? (
-                <pre className="rounded-lg bg-gray-900 p-4 text-xs text-gray-300 overflow-x-auto leading-relaxed">
-                  {JSON.stringify(detail, null, 2)}
-                </pre>
-              ) : activeTab === "summary" ? (
-                <div className="space-y-4">
-                  {parsed.title && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 mb-1">Title</p>
-                      <p className="text-sm text-gray-200">{parsed.title}</p>
-                    </div>
-                  )}
-                  {parsed.summary && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 mb-1">Summary</p>
-                      <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">
-                        {parsed.summary}
-                      </p>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="rounded-lg bg-gray-800/50 p-3">
-                      <p className="text-xs text-gray-500">Confidence</p>
-                      <p className="mt-1 text-lg font-bold text-emerald-400">
-                        {parsed.confidence_score != null
-                          ? `${Math.round(parsed.confidence_score * 100)}%`
-                          : "—"}
-                      </p>
-                    </div>
-                    <div className="rounded-lg bg-gray-800/50 p-3">
-                      <p className="text-xs text-gray-500">Endpoints</p>
-                      <p className="mt-1 text-lg font-bold text-white">
-                        {parsed.endpoints?.length ?? 0}
-                      </p>
-                    </div>
-                    <div className="rounded-lg bg-gray-800/50 p-3">
-                      <p className="text-xs text-gray-500">Fields</p>
-                      <p className="mt-1 text-lg font-bold text-white">
-                        {parsed.fields?.length ?? 0}
-                      </p>
-                    </div>
-                    <div className="rounded-lg bg-gray-800/50 p-3">
-                      <p className="text-xs text-gray-500">Auth Schemes</p>
-                      <p className="mt-1 text-lg font-bold text-white">
-                        {parsed.auth_requirements?.length ?? 0}
-                      </p>
-                    </div>
-                  </div>
-                  {parsed.services_identified && parsed.services_identified.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 mb-2">Services Identified</p>
-                      <div className="flex flex-wrap gap-2">
-                        {parsed.services_identified.map((s) => (
-                          <span
-                            key={s}
-                            className="rounded-full bg-indigo-500/10 px-3 py-1 text-xs text-indigo-300"
-                          >
-                            {s}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {parsed.sections?.base_urls && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 mb-2">Base URLs</p>
-                      <code className="block rounded bg-gray-800 px-3 py-1.5 text-xs text-indigo-300">
-                        {parsed.sections.base_urls}
-                      </code>
-                    </div>
-                  )}
-                  {parsed.parse_errors && parsed.parse_errors.length > 0 && (
-                    <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
-                      <p className="text-xs font-medium text-red-400 mb-1">Parse Errors</p>
-                      {parsed.parse_errors.map((e) => (
-                        <p key={e} className="text-xs text-red-300">
-                          {e}
-                        </p>
-                      ))}
-                    </div>
-                  )}
+        {/* Body */}
+        <div style={{ flex: 1, overflow: "auto", padding: "1.25rem" }}>
+          {isLoading ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: "3rem" }}>
+              <Loader2
+                style={{
+                  width: 24,
+                  height: 24,
+                  color: "var(--color-brand-light)",
+                  animation: "spin 1s linear infinite",
+                }}
+              />
+              <style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style>
+            </div>
+          ) : error || !parsed ? (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "0.75rem",
+                padding: "3rem",
+                textAlign: "center",
+              }}
+            >
+              <AlertCircle style={{ width: 32, height: 32, color: "var(--color-text-muted)" }} />
+              <p style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>
+                {error ? "Failed to load document details." : "No parsed data available."}
+              </p>
+            </div>
+          ) : tab === "summary" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {parsed.title && (
+                <div>
+                  <p
+                    style={{
+                      fontSize: "0.6875rem",
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      color: "var(--color-text-muted)",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Title
+                  </p>
+                  <p style={{ fontSize: "0.875rem", color: "var(--color-text-primary)" }}>
+                    {parsed.title}
+                  </p>
                 </div>
-              ) : activeTab === "endpoints" ? (
-                parsed.endpoints && parsed.endpoints.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-gray-800">
-                          <th className="pb-2 text-left font-medium text-gray-500">Method</th>
-                          <th className="pb-2 text-left font-medium text-gray-500">Path</th>
-                          <th className="pb-2 text-left font-medium text-gray-500">Description</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/60">
-                        {parsed.endpoints.map((ep, i) => (
-                          // biome-ignore lint/suspicious/noArrayIndexKey: endpoints lack stable id
-                          <tr key={i} className="hover:bg-gray-800/30">
-                            <td className="py-2 pr-3">
-                              <span
-                                className={clsx(
-                                  "inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase",
-                                  methodBadgeCls(ep.method)
-                                )}
-                              >
-                                {ep.method}
-                              </span>
-                            </td>
-                            <td className="py-2 pr-3 font-mono text-gray-300">{ep.path}</td>
-                            <td className="py-2 text-gray-400">
-                              {ep.description || ep.summary || "—"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+              )}
+              {parsed.summary && (
+                <div>
+                  <p
+                    style={{
+                      fontSize: "0.6875rem",
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      color: "var(--color-text-muted)",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Summary
+                  </p>
+                  <p
+                    style={{
+                      fontSize: "0.8125rem",
+                      color: "var(--color-text-secondary)",
+                      lineHeight: 1.6,
+                      whiteSpace: "pre-line",
+                    }}
+                  >
+                    {parsed.summary}
+                  </p>
+                </div>
+              )}
+              <div
+                style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem" }}
+              >
+                {[
+                  {
+                    label: "Confidence",
+                    value:
+                      parsed.confidence_score != null
+                        ? `${Math.round(parsed.confidence_score * 100)}%`
+                        : "—",
+                    accent: "var(--color-teal)",
+                  },
+                  {
+                    label: "Endpoints",
+                    value: String(parsed.endpoints?.length ?? 0),
+                    accent: "var(--color-brand-light)",
+                  },
+                  {
+                    label: "Fields",
+                    value: String(parsed.fields?.length ?? 0),
+                    accent: "var(--color-brand-light)",
+                  },
+                  {
+                    label: "Auth Schemes",
+                    value: String(parsed.auth_requirements?.length ?? 0),
+                    accent: "var(--color-brand-light)",
+                  },
+                ].map(({ label, value, accent }) => (
+                  <div
+                    key={label}
+                    style={{
+                      background: "var(--color-bg-raised)",
+                      borderRadius: "0.5rem",
+                      padding: "0.75rem",
+                      border: "1px solid var(--color-border)",
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontSize: "0.6875rem",
+                        color: "var(--color-text-muted)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {label}
+                    </p>
+                    <p
+                      style={{ fontSize: "1.25rem", fontWeight: 700, color: accent, marginTop: 4 }}
+                    >
+                      {value}
+                    </p>
                   </div>
-                ) : (
-                  <p className="text-sm text-gray-500 text-center py-8">No endpoints extracted.</p>
-                )
-              ) : activeTab === "fields" ? (
-                parsed.fields && parsed.fields.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-gray-800">
-                          <th className="pb-2 text-left font-medium text-gray-500">Name</th>
-                          <th className="pb-2 text-left font-medium text-gray-500">Type</th>
-                          <th className="pb-2 text-left font-medium text-gray-500">Required</th>
-                          <th className="pb-2 text-left font-medium text-gray-500">Source</th>
-                          <th className="pb-2 text-left font-medium text-gray-500">Description</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-800/60">
-                        {parsed.fields.map((f, i) => (
-                          // biome-ignore lint/suspicious/noArrayIndexKey: field list lacks stable id
-                          <tr key={i} className="hover:bg-gray-800/30">
-                            <td className="py-2 pr-3 font-mono text-gray-200">{f.name}</td>
-                            <td className="py-2 pr-3 text-indigo-400">{f.data_type ?? "—"}</td>
-                            <td className="py-2 pr-3">
-                              {f.is_required ? (
-                                <span className="text-emerald-400 font-medium">Yes</span>
-                              ) : (
-                                <span className="text-gray-600">No</span>
-                              )}
-                            </td>
-                            <td className="py-2 pr-3 text-gray-500 text-[10px]">
-                              {f.source_section || "—"}
-                            </td>
-                            <td className="py-2 text-gray-400">{f.description || "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 text-center py-8">No fields extracted.</p>
-                )
-              ) : activeTab === "auth" ? (
-                parsed.auth_requirements && parsed.auth_requirements.length > 0 ? (
-                  <div className="space-y-3">
-                    {parsed.auth_requirements.map((auth, i) => (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: auth list lacks stable id
-                      <div key={i} className="rounded-lg border border-gray-800 bg-gray-900/40 p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Shield className="h-3.5 w-3.5 text-indigo-400" />
-                          <span className="text-xs font-semibold text-indigo-300 uppercase tracking-wide">
-                            {auth.auth_type}
-                          </span>
-                        </div>
-                        {auth.details?.name && (
-                          <p className="text-xs text-gray-400">
-                            Name: <code className="text-gray-300">{auth.details.name}</code>
-                          </p>
-                        )}
-                        {auth.details?.in && (
-                          <p className="text-xs text-gray-400">
-                            Location: <code className="text-gray-300">{auth.details.in}</code>
-                          </p>
-                        )}
-                      </div>
+                ))}
+              </div>
+              {parsed.services_identified && parsed.services_identified.length > 0 && (
+                <div>
+                  <p
+                    style={{
+                      fontSize: "0.6875rem",
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      color: "var(--color-text-muted)",
+                      marginBottom: 8,
+                    }}
+                  >
+                    Services Identified
+                  </p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                    {parsed.services_identified.map((s) => (
+                      <span key={s} className="badge-teal">
+                        {s}
+                      </span>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-sm text-gray-500 text-center py-8">
-                    No auth requirements extracted.
+                </div>
+              )}
+              {parsed.parse_errors && parsed.parse_errors.length > 0 && (
+                <div
+                  style={{
+                    border: "1px solid rgba(220,38,38,0.2)",
+                    background: "rgba(220,38,38,0.05)",
+                    borderRadius: "0.5rem",
+                    padding: "0.75rem",
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: "0.6875rem",
+                      fontWeight: 600,
+                      color: "var(--color-error-text)",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Parse Errors
                   </p>
-                )
-              ) : null}
+                  {parsed.parse_errors.map((e) => (
+                    <p key={e} style={{ fontSize: "0.75rem", color: "var(--color-error-text)" }}>
+                      {e}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
-          </>
-        )}
+          ) : tab === "endpoints" ? (
+            parsed.endpoints && parsed.endpoints.length > 0 ? (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
+                <thead>
+                  <tr>
+                    {["Method", "Path", "Description"].map((h) => (
+                      <th
+                        key={h}
+                        className="table-header"
+                        style={{ textAlign: "left", paddingLeft: h === "Method" ? 0 : undefined }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {parsed.endpoints.map((ep, i) => {
+                    const mc = METHOD_COLOR[ep.method] ?? {
+                      bg: "rgba(71,85,105,0.15)",
+                      text: "#94a3b8",
+                    };
+                    return (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: endpoints lack stable id
+                      <tr key={i} className="table-row">
+                        <td style={{ paddingLeft: 0, paddingRight: "0.75rem", width: "5rem" }}>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              padding: "0.125rem 0.5rem",
+                              borderRadius: "0.25rem",
+                              fontSize: "0.6875rem",
+                              fontWeight: 700,
+                              background: mc.bg,
+                              color: mc.text,
+                              letterSpacing: "0.04em",
+                            }}
+                          >
+                            {ep.method}
+                          </span>
+                        </td>
+                        <td
+                          className="mono"
+                          style={{ paddingRight: "0.75rem", color: "var(--color-text-primary)" }}
+                        >
+                          {ep.path}
+                        </td>
+                        <td style={{ color: "var(--color-text-secondary)" }}>
+                          {ep.description ?? ep.summary ?? "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <p
+                style={{
+                  fontSize: "0.875rem",
+                  color: "var(--color-text-muted)",
+                  textAlign: "center",
+                  padding: "3rem 0",
+                }}
+              >
+                No endpoints extracted.
+              </p>
+            )
+          ) : tab === "fields" ? (
+            parsed.fields && parsed.fields.length > 0 ? (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
+                <thead>
+                  <tr>
+                    {["Name", "Type", "Required", "Source"].map((h) => (
+                      <th key={h} className="table-header" style={{ textAlign: "left" }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {parsed.fields.map((f, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: field list lacks stable id
+                    <tr key={i} className="table-row">
+                      <td
+                        className="mono"
+                        style={{
+                          paddingRight: "0.75rem",
+                          color: "var(--color-text-primary)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {f.name}
+                      </td>
+                      <td style={{ paddingRight: "0.75rem", color: "var(--color-brand-light)" }}>
+                        {f.data_type ?? "—"}
+                      </td>
+                      <td style={{ paddingRight: "0.75rem" }}>
+                        {f.is_required ? (
+                          <span style={{ color: "var(--color-teal)", fontWeight: 600 }}>Yes</span>
+                        ) : (
+                          <span style={{ color: "var(--color-text-muted)" }}>No</span>
+                        )}
+                      </td>
+                      <td style={{ color: "var(--color-text-muted)", fontSize: "0.6875rem" }}>
+                        {f.source_section ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p
+                style={{
+                  fontSize: "0.875rem",
+                  color: "var(--color-text-muted)",
+                  textAlign: "center",
+                  padding: "3rem 0",
+                }}
+              >
+                No fields extracted.
+              </p>
+            )
+          ) : tab === "auth" ? (
+            parsed.auth_requirements && parsed.auth_requirements.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                {parsed.auth_requirements.map((auth, i) => (
+                  <div
+                    key={`${auth.auth_type}-${i}`}
+                    style={{
+                      border: "1px solid var(--color-border)",
+                      background: "var(--color-bg-raised)",
+                      borderRadius: "0.5rem",
+                      padding: "1rem",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        marginBottom: "0.5rem",
+                      }}
+                    >
+                      <Shield
+                        style={{ width: 14, height: 14, color: "var(--color-brand-light)" }}
+                      />
+                      <span
+                        style={{
+                          fontSize: "0.6875rem",
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          color: "var(--color-brand-light)",
+                        }}
+                      >
+                        {auth.auth_type}
+                      </span>
+                    </div>
+                    {auth.details?.name && (
+                      <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)" }}>
+                        Name:{" "}
+                        <code
+                          style={{
+                            fontFamily: '"IBM Plex Mono", monospace',
+                            color: "var(--color-text-primary)",
+                          }}
+                        >
+                          {auth.details.name}
+                        </code>
+                      </p>
+                    )}
+                    {auth.details?.in && (
+                      <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)" }}>
+                        Location:{" "}
+                        <code
+                          style={{
+                            fontFamily: '"IBM Plex Mono", monospace',
+                            color: "var(--color-text-primary)",
+                          }}
+                        >
+                          {auth.details.in}
+                        </code>
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p
+                style={{
+                  fontSize: "0.875rem",
+                  color: "var(--color-text-muted)",
+                  textAlign: "center",
+                  padding: "3rem 0",
+                }}
+              >
+                No auth requirements extracted.
+              </p>
+            )
+          ) : (
+            <pre
+              style={{
+                background: "var(--color-bg-base)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "0.5rem",
+                padding: "1rem",
+                fontSize: "0.75rem",
+                color: "var(--color-text-secondary)",
+                overflowX: "auto",
+                lineHeight: 1.6,
+              }}
+            >
+              {JSON.stringify(detail, null, 2)}
+            </pre>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: page component with upload, list, modals
+// ── Documents page ────────────────────────────────────────────────────────────
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: page-level component managing upload, list, modals
 export default function Documents() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
-  const [confirmDeleteDoc, setConfirmDeleteDoc] = useState<Document | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Document | null>(null);
   const [search, setSearch] = useState("");
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   const { data, error, isLoading } = useQuery({
     queryKey: ["documents"],
@@ -450,8 +687,7 @@ export default function Documents() {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
     onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Upload failed. Please try again.";
-      setUploadError(message);
+      setUploadError(err instanceof Error ? err.message : "Upload failed. Please try again.");
     },
   });
 
@@ -459,47 +695,41 @@ export default function Documents() {
     mutationFn: (id: string) => documentsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
-      setConfirmDeleteDoc(null);
+      setConfirmDelete(null);
       toast("Document deleted.", "success");
     },
     onError: () => {
       toast("Failed to delete document.", "error");
-      setConfirmDeleteDoc(null);
+      setConfirmDelete(null);
     },
   });
 
   const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
+    (accepted: File[]) => {
       setUploadError(null);
-      for (const file of acceptedFiles) {
+      for (const file of accepted) {
         setUploadQueue((q) => [...q, file.name]);
         uploadMutation.mutate(file, {
-          onSettled: () => {
-            setUploadQueue((q) => q.filter((n) => n !== file.name));
-          },
+          onSettled: () => setUploadQueue((q) => q.filter((n) => n !== file.name)),
         });
       }
     },
     [uploadMutation]
   );
 
-  const onDropRejected = useCallback((rejectedFiles: FileRejection[]) => {
-    const messages = rejectedFiles.flatMap((r) =>
+  const onDropRejected = useCallback((rejected: FileRejection[]) => {
+    const msgs = rejected.flatMap((r) =>
       r.errors.map((e) =>
-        e.code === "file-too-large" ? `${r.file.name} exceeds the 50 MB size limit` : e.message
+        e.code === "file-too-large" ? `${r.file.name} exceeds the 50 MB limit` : e.message
       )
     );
-    setUploadError(messages.join("; "));
+    setUploadError(msgs.join("; "));
   }, []);
-
-  const isBackendDown = !!error;
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     onDropRejected,
-    noClick: isBackendDown,
-    noDrag: isBackendDown,
-    disabled: isBackendDown,
+    disabled: !!error,
     maxSize: 50 * 1024 * 1024,
     accept: {
       "application/pdf": [".pdf"],
@@ -513,63 +743,138 @@ export default function Documents() {
     },
   });
 
-  const allDocuments: Document[] = data?.data ?? [];
-  const documents = search.trim()
-    ? allDocuments.filter((d) => d.filename.toLowerCase().includes(search.trim().toLowerCase()))
-    : allDocuments;
+  const allDocs: Document[] = data?.data ?? [];
+  const docs = search.trim()
+    ? allDocs.filter((d) => d.filename.toLowerCase().includes(search.toLowerCase().trim()))
+    : allDocs;
 
   return (
-    <div className="space-y-6">
+    <div
+      className="animate-fade-in"
+      style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}
+    >
+      {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Documents</h1>
-        <p className="mt-1 text-sm text-gray-400">Upload and manage integration documents</p>
+        <h1
+          style={{
+            fontSize: "1.25rem",
+            fontWeight: 700,
+            color: "var(--color-text-primary)",
+            marginBottom: 2,
+          }}
+        >
+          Documents
+        </h1>
+        <p style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>
+          Upload and manage integration documents
+        </p>
       </div>
 
+      {/* Alerts */}
       {error && (
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-400">
-          Backend unavailable. Uploads disabled.
+        <div
+          style={{
+            border: "1px solid rgba(217,119,6,0.25)",
+            background: "rgba(217,119,6,0.05)",
+            borderRadius: "0.5rem",
+            padding: "0.75rem 1rem",
+            fontSize: "0.8125rem",
+            color: "var(--color-warning-text)",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+          }}
+        >
+          <AlertCircle style={{ width: 14, height: 14, flexShrink: 0 }} />
+          Backend unavailable — uploads disabled.
         </div>
       )}
-
       {uploadError && (
-        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-400">
+        <div
+          style={{
+            border: "1px solid rgba(220,38,38,0.25)",
+            background: "rgba(220,38,38,0.05)",
+            borderRadius: "0.5rem",
+            padding: "0.75rem 1rem",
+            fontSize: "0.8125rem",
+            color: "var(--color-error-text)",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+          }}
+        >
+          <AlertCircle style={{ width: 14, height: 14, flexShrink: 0 }} />
           {uploadError}
+          <button
+            type="button"
+            onClick={() => setUploadError(null)}
+            style={{
+              marginLeft: "auto",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "inherit",
+              padding: 0,
+            }}
+          >
+            <X style={{ width: 14, height: 14 }} />
+          </button>
         </div>
       )}
 
       {/* Drop zone */}
       <div
         {...getRootProps()}
-        className={clsx(
-          "card border-2 border-dashed p-10 text-center transition-all",
-          isBackendDown
-            ? "cursor-not-allowed opacity-50 border-gray-700"
-            : isDragActive
-              ? "cursor-pointer border-indigo-500 bg-indigo-500/5"
-              : "group cursor-pointer border-gray-700 hover:border-gray-500"
-        )}
+        style={{
+          border: `2px dashed ${isDragActive ? "var(--color-brand-light)" : "var(--color-border-strong)"}`,
+          background: isDragActive ? "var(--color-brand-subtle)" : "var(--color-bg-elevated)",
+          borderRadius: "0.75rem",
+          padding: "2.5rem 1.5rem",
+          textAlign: "center",
+          cursor: error ? "not-allowed" : "pointer",
+          opacity: error ? 0.5 : 1,
+          transition: "border-color 150ms, background 150ms",
+        }}
       >
         <input {...getInputProps()} />
-        <div className="flex flex-col items-center gap-3">
+        <div
+          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem" }}
+        >
           <div
-            className={clsx(
-              "rounded-full p-3 transition-colors",
-              isDragActive
-                ? "bg-indigo-500/20 text-indigo-400"
-                : "bg-gray-800 text-gray-400 group-hover:text-gray-300"
-            )}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: "50%",
+              background: isDragActive ? "var(--color-brand-subtle)" : "var(--color-bg-raised)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: `1px solid ${isDragActive ? "var(--color-brand)" : "var(--color-border)"}`,
+            }}
           >
-            <Upload className="h-6 w-6" />
+            <Upload
+              style={{
+                width: 20,
+                height: 20,
+                color: isDragActive ? "var(--color-brand-light)" : "var(--color-text-muted)",
+              }}
+            />
           </div>
           <div>
-            <p className="font-medium text-gray-300">
-              {isBackendDown
+            <p
+              style={{
+                fontSize: "0.875rem",
+                fontWeight: 600,
+                color: isDragActive ? "var(--color-brand-light)" : "var(--color-text-primary)",
+              }}
+            >
+              {error
                 ? "Upload unavailable — backend offline"
                 : isDragActive
-                  ? "Drop files here..."
+                  ? "Drop to upload"
                   : "Drag & drop files, or click to browse"}
             </p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p style={{ fontSize: "0.6875rem", color: "var(--color-text-muted)", marginTop: 4 }}>
               PDF, DOCX, YAML, JSON, XML, CSV, XLSX &middot; max 50 MB
             </p>
           </div>
@@ -578,164 +883,391 @@ export default function Documents() {
 
       {/* Upload queue */}
       {uploadQueue.length > 0 && (
-        <div className="space-y-2">
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {uploadQueue.map((name) => (
             <div
               key={name}
-              className="flex items-center gap-3 rounded-lg border border-indigo-500/20 bg-indigo-500/5 px-4 py-3"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.75rem",
+                border: "1px solid var(--color-brand-subtle)",
+                background: "var(--color-brand-subtle)",
+                borderRadius: "0.5rem",
+                padding: "0.625rem 0.875rem",
+              }}
             >
-              <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
-              <span className="text-sm text-indigo-300">{name}</span>
-              <span className="text-xs text-indigo-400/60">Uploading...</span>
+              <Loader2
+                style={{
+                  width: 14,
+                  height: 14,
+                  color: "var(--color-brand-light)",
+                  animation: "spin 1s linear infinite",
+                }}
+              />
+              <span
+                className="mono"
+                style={{
+                  fontSize: "0.8125rem",
+                  color: "var(--color-text-primary)",
+                  flex: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {name}
+              </span>
+              <span style={{ fontSize: "0.6875rem", color: "var(--color-text-muted)" }}>
+                Uploading…
+              </span>
             </div>
           ))}
         </div>
       )}
 
-      {/* Document list */}
-      <div className="card overflow-hidden">
-        <div className="border-b border-gray-800 px-6 py-4 flex items-center gap-3">
-          <h2 className="font-semibold text-white flex-1">
-            Recent Documents{" "}
+      {/* Document table */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        {/* Table toolbar */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.75rem",
+            borderBottom: "1px solid var(--color-border)",
+            padding: "0.875rem 1.25rem",
+          }}
+        >
+          <h2
+            style={{
+              flex: 1,
+              fontSize: "0.875rem",
+              fontWeight: 600,
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Documents
             {!isLoading && (
-              <span className="text-sm font-normal text-gray-500">({documents.length})</span>
+              <span
+                style={{
+                  marginLeft: "0.375rem",
+                  fontWeight: 400,
+                  color: "var(--color-text-muted)",
+                  fontSize: "0.8125rem",
+                }}
+              >
+                ({docs.length})
+              </span>
             )}
           </h2>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
+          <div style={{ position: "relative" }}>
+            <Search
+              style={{
+                position: "absolute",
+                left: "0.625rem",
+                top: "50%",
+                transform: "translateY(-50%)",
+                width: 13,
+                height: 13,
+                color: "var(--color-text-muted)",
+                pointerEvents: "none",
+              }}
+            />
             <input
               type="text"
-              placeholder="Search by filename..."
+              placeholder="Search filenames…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-1.5 text-sm text-gray-300 placeholder-gray-600 focus:border-indigo-500 focus:outline-none hover:border-gray-600 transition-colors w-52"
+              style={{
+                background: "var(--color-bg-raised)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "0.375rem",
+                paddingLeft: "2rem",
+                paddingRight: "0.75rem",
+                paddingTop: "0.375rem",
+                paddingBottom: "0.375rem",
+                fontSize: "0.8125rem",
+                color: "var(--color-text-primary)",
+                width: "13rem",
+                outline: "none",
+              }}
             />
           </div>
         </div>
 
+        {/* Table */}
         {isLoading ? (
-          <div className="divide-y divide-gray-800/60">
-            {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            style={{
+              padding: "1.5rem 1.25rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.75rem",
+            }}
+          >
+            {(["sk1", "sk2", "sk3", "sk4"] as const).map((sk) => (
               <div
-                // biome-ignore lint/suspicious/noArrayIndexKey: skeleton rows have no stable id
-                key={i}
-                className="flex items-center gap-4 px-6 py-4"
-              >
-                <div className="h-8 w-8 animate-pulse rounded-lg bg-gray-800" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 w-48 animate-pulse rounded bg-gray-800" />
-                  <div className="h-3 w-32 animate-pulse rounded bg-gray-800" />
-                </div>
-                <div className="h-5 w-20 animate-pulse rounded-full bg-gray-800" />
-              </div>
+                key={sk}
+                style={{
+                  height: "2.5rem",
+                  background: "var(--color-bg-raised)",
+                  borderRadius: "0.375rem",
+                  animation: "pulse 1.5s ease-in-out infinite",
+                }}
+              />
             ))}
+            <style>{"@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}"}</style>
           </div>
-        ) : documents.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
-            <div className="rounded-full bg-gray-800 p-4">
+        ) : docs.length === 0 ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "0.75rem",
+              padding: "4rem 1.5rem",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: "var(--color-bg-raised)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
               {search.trim() ? (
-                <Search className="h-6 w-6 text-gray-500" />
+                <Search style={{ width: 20, height: 20, color: "var(--color-text-muted)" }} />
               ) : (
-                <Upload className="h-6 w-6 text-gray-500" />
+                <Upload style={{ width: 20, height: 20, color: "var(--color-text-muted)" }} />
               )}
             </div>
-            <p className="font-medium text-gray-400">
-              {search.trim() ? "No matching documents." : "No documents yet."}
+            <p
+              style={{
+                fontSize: "0.875rem",
+                fontWeight: 600,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              {search.trim() ? "No matching documents" : "No documents yet"}
             </p>
-            <p className="text-sm text-gray-500">
+            <p style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>
               {search.trim()
-                ? `No filenames match "${search}".`
-                : "Upload your first document using the drop zone above."}
+                ? `No filenames match "${search}"`
+                : "Drop a file above to get started"}
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-800/60">
-            {documents.map((doc) => {
-              const st = statusConfig[doc.status] ?? {
-                label: doc.status,
-                icon: Clock,
-                cls: "badge-gray",
-              };
-              const IconFile = fileIcon(doc.file_type);
-              const StatusIcon = st.icon;
-
-              return (
-                <div
-                  key={doc.id}
-                  className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-gray-800/30"
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th className="table-header" style={{ textAlign: "left", paddingLeft: "1.25rem" }}>
+                  Filename
+                </th>
+                <th className="table-header" style={{ textAlign: "left" }}>
+                  Type
+                </th>
+                <th className="table-header" style={{ textAlign: "left" }}>
+                  Doc Type
+                </th>
+                <th className="table-header" style={{ textAlign: "left" }}>
+                  Status
+                </th>
+                <th className="table-header" style={{ textAlign: "left" }}>
+                  Created
+                </th>
+                <th
+                  className="table-header"
+                  style={{ textAlign: "right", paddingRight: "1.25rem" }}
                 >
-                  <button
-                    type="button"
-                    className="flex flex-1 items-center gap-4 text-left min-w-0"
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {docs.map((doc) => {
+                const FileIcon = fileIcon(doc.file_type);
+                const isHovered = hoveredRow === doc.id;
+                return (
+                  // biome-ignore lint/a11y/useKeyWithClickEvents: tr click opens detail; delete button is keyboard-focusable
+                  <tr
+                    key={doc.id}
+                    className="table-row"
                     onClick={() => setSelectedDoc(doc)}
+                    onMouseEnter={() => setHoveredRow(doc.id)}
+                    onMouseLeave={() => setHoveredRow(null)}
+                    style={{ cursor: "pointer" }}
                   >
-                    <div className="rounded-lg bg-gray-800 p-2 shrink-0">
-                      <IconFile className="h-4 w-4 text-gray-400" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-gray-200">{doc.filename}</p>
-                      <p className="text-xs text-gray-500">
-                        {doc.file_type.toUpperCase()} &middot; {formatDate(doc.created_at)}
-                      </p>
-                    </div>
-                    <span className={st.cls}>
-                      <StatusIcon
-                        className={clsx(
-                          "mr-1 h-3 w-3",
-                          doc.status === "processing" && "animate-spin"
-                        )}
-                      />
-                      {st.label}
-                    </span>
-                    <ChevronRight className="h-4 w-4 text-gray-600 shrink-0" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDeleteDoc(doc)}
-                    className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
-                    aria-label={`Delete ${doc.filename}`}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                    <td style={{ paddingLeft: "1.25rem", paddingRight: "0.75rem" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+                        <div
+                          style={{
+                            width: 28,
+                            height: 28,
+                            background: "var(--color-bg-raised)",
+                            border: "1px solid var(--color-border)",
+                            borderRadius: "0.375rem",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <FileIcon
+                            style={{ width: 13, height: 13, color: "var(--color-text-muted)" }}
+                          />
+                        </div>
+                        <span
+                          className="mono"
+                          style={{
+                            color: "var(--color-text-primary)",
+                            fontSize: "0.8125rem",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            maxWidth: "18rem",
+                          }}
+                        >
+                          {doc.filename}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ paddingRight: "0.75rem" }}>
+                      <span className="badge-gray">{doc.file_type.toUpperCase()}</span>
+                    </td>
+                    <td style={{ paddingRight: "0.75rem" }}>
+                      <span className={DOC_TYPE_BADGE[doc.doc_type] ?? "badge-gray"}>
+                        {doc.doc_type === "api_spec"
+                          ? "API Spec"
+                          : doc.doc_type === "brd"
+                            ? "BRD"
+                            : doc.doc_type}
+                      </span>
+                    </td>
+                    <td style={{ paddingRight: "0.75rem" }}>
+                      <StatusDot status={doc.status} />
+                    </td>
+                    <td
+                      style={{
+                        paddingRight: "0.75rem",
+                        fontSize: "0.75rem",
+                        color: "var(--color-text-muted)",
+                      }}
+                    >
+                      {formatDate(doc.created_at)}
+                    </td>
+                    <td style={{ paddingRight: "1.25rem", textAlign: "right" }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDelete(doc);
+                        }}
+                        aria-label={`Delete ${doc.filename}`}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: "0.25rem",
+                          borderRadius: "0.25rem",
+                          color: isHovered ? "var(--color-error-text)" : "transparent",
+                          transition: "color 120ms",
+                        }}
+                      >
+                        <Trash2 style={{ width: 14, height: 14 }} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
 
       {/* Detail modal */}
       {selectedDoc && <DetailModal doc={selectedDoc} onClose={() => setSelectedDoc(null)} />}
 
-      {/* Delete confirmation dialog */}
-      {confirmDeleteDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss, keyboard handled by Cancel button */}
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss, keyboard handled by Cancel button
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.65)" }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfirmDelete(null);
+          }}
+        >
           <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setConfirmDeleteDoc(null)}
-          />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-gray-800 bg-gray-950 p-6 shadow-2xl">
-            <h3 className="font-semibold text-white mb-2">Delete document?</h3>
-            <p className="text-sm text-gray-400 mb-5">
-              <span className="text-gray-200">{confirmDeleteDoc.filename}</span> will be permanently
-              deleted. This cannot be undone.
+            className="animate-fade-in"
+            style={{
+              background: "var(--color-bg-elevated)",
+              border: "1px solid var(--color-border-strong)",
+              borderRadius: "0.75rem",
+              padding: "1.5rem",
+              width: "100%",
+              maxWidth: "24rem",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+            }}
+          >
+            <h3
+              style={{
+                fontSize: "0.9375rem",
+                fontWeight: 700,
+                color: "var(--color-text-primary)",
+                marginBottom: "0.5rem",
+              }}
+            >
+              Delete document?
+            </h3>
+            <p
+              style={{
+                fontSize: "0.8125rem",
+                color: "var(--color-text-secondary)",
+                marginBottom: "1.25rem",
+                lineHeight: 1.5,
+              }}
+            >
+              <span className="mono" style={{ color: "var(--color-text-primary)" }}>
+                {confirmDelete.filename}
+              </span>{" "}
+              will be permanently deleted. This cannot be undone.
             </p>
-            <div className="flex gap-3 justify-end">
+            <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => setConfirmDeleteDoc(null)}
+                onClick={() => setConfirmDelete(null)}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+                className="btn-danger"
+                style={{
+                  background: deleteMutation.isPending ? undefined : "rgba(220,38,38,0.12)",
+                  borderColor: "rgba(220,38,38,0.3)",
+                  color: "var(--color-error-text)",
+                }}
                 disabled={deleteMutation.isPending}
-                onClick={() => deleteMutation.mutate(confirmDeleteDoc.id)}
+                onClick={() => deleteMutation.mutate(confirmDelete.id)}
               >
-                {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                {deleteMutation.isPending ? (
+                  <>
+                    <Loader2
+                      style={{ width: 13, height: 13, animation: "spin 1s linear infinite" }}
+                    />{" "}
+                    Deleting…
+                  </>
+                ) : (
+                  <>
+                    <Trash2 style={{ width: 13, height: 13 }} /> Delete
+                  </>
+                )}
               </button>
             </div>
           </div>

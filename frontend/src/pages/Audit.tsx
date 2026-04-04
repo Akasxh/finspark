@@ -2,31 +2,18 @@ import Pagination from "@/components/Pagination";
 import { auditApi } from "@/lib/api";
 import type { AuditEntry } from "@/types";
 import { useQuery } from "@tanstack/react-query";
-import clsx from "clsx";
-import { ChevronDown, Play, Plug, RefreshCw, Settings, Shield, Upload, User } from "lucide-react";
+import { ChevronDown, ChevronRight, Shield } from "lucide-react";
 import { useState } from "react";
-
-const actionIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-  document_upload: Upload,
-  upload_document: Upload,
-  document_process: RefreshCw,
-  run_simulation: Play,
-  generate_config: Settings,
-  transition: Settings,
-  rollback: RefreshCw,
-  adapter_sync: RefreshCw,
-  adapter_activate: Plug,
-  delete_document: Upload,
-};
 
 const ACTION_OPTIONS = [
   { value: "", label: "All Actions" },
   { value: "upload_document", label: "Upload Document" },
-  { value: "generate_config", label: "Generate Config" },
-  { value: "run_simulation", label: "Run Simulation" },
   { value: "delete_document", label: "Delete Document" },
+  { value: "generate_config", label: "Generate Config" },
   { value: "transition", label: "Transition" },
   { value: "rollback", label: "Rollback" },
+  { value: "run_simulation", label: "Run Simulation" },
+  { value: "create", label: "Create" },
 ];
 
 const RESOURCE_TYPE_OPTIONS = [
@@ -34,51 +21,99 @@ const RESOURCE_TYPE_OPTIONS = [
   { value: "document", label: "Document" },
   { value: "configuration", label: "Configuration" },
   { value: "simulation", label: "Simulation" },
+  { value: "adapter", label: "Adapter" },
 ];
 
+const ACTION_BADGE: Record<string, [string, string, string]> = {
+  upload_document: ["Upload",     "#2d8fce", "rgba(29,111,164,0.15)"],
+  delete_document: ["Delete",     "#f87171", "rgba(248,113,113,0.12)"],
+  generate_config: ["Gen Config", "#0fb89a", "rgba(15,184,154,0.12)"],
+  transition:      ["Transition", "#facc15", "rgba(250,204,21,0.12)"],
+  rollback:        ["Rollback",   "#facc15", "rgba(250,204,21,0.12)"],
+  run_simulation:  ["Simulation", "#2d8fce", "rgba(29,111,164,0.15)"],
+  create:          ["Create",     "#0fb89a", "rgba(15,184,154,0.12)"],
+};
+
+const RESOURCE_BADGE: Record<string, [string, string]> = {
+  document:      ["#2d8fce", "rgba(29,111,164,0.15)"],
+  configuration: ["#0fb89a", "rgba(15,184,154,0.12)"],
+  simulation:    ["#facc15", "rgba(250,204,21,0.12)"],
+  adapter:       ["#94a3b8", "rgba(148,163,184,0.12)"],
+};
+
 const PAGE_SIZE = 20;
+const BADGE_BASE: React.CSSProperties = { fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 4, textTransform: "uppercase", whiteSpace: "nowrap" };
+const SELECT_STYLE: React.CSSProperties = { appearance: "none", background: "#0f1724", border: "1px solid #1e2d47", borderRadius: 6, color: "#94a3b8", fontSize: 13, padding: "6px 28px 6px 10px", cursor: "pointer", outline: "none" };
+const COL_HEADERS = ["Timestamp", "Actor", "Action", "Resource Type", "Resource ID", "Details"];
 
-function formatTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function relativeTime(iso: string): string {
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  if (m < 1440) return `${Math.floor(m / 60)}h ago`;
+  const d = Math.floor(m / 1440);
+  return d < 30 ? `${d}d ago` : new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function SkeletonRow() {
+function Chip({ label, color, bg }: { label: string; color: string; bg: string }) {
+  return <span style={{ ...BADGE_BASE, color, background: bg }}>{label}</span>;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: row with expand logic
+function AuditRow({ entry }: { entry: AuditEntry }) {
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const hasDetails = !!entry.details && Object.keys(entry.details).length > 0;
+  const [aLabel, aColor, aBg] = ACTION_BADGE[entry.action] ?? [entry.action, "#94a3b8", "rgba(148,163,184,0.12)"];
+  const [rColor, rBg] = RESOURCE_BADGE[entry.resource_type] ?? ["#94a3b8", "rgba(148,163,184,0.12)"];
+
   return (
-    <div
-      className="relative flex gap-4 px-6 py-4 border-b border-gray-800/40 animate-pulse"
-      aria-hidden="true"
-    >
-      <div className="relative z-10 h-8 w-8 shrink-0 rounded-full bg-gray-800" />
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="space-y-1.5 flex-1">
-            <div className="h-4 w-40 rounded bg-gray-800" />
-            <div className="h-3 w-28 rounded bg-gray-800" />
-          </div>
-          <div className="h-3 w-16 rounded bg-gray-800" />
-        </div>
-        <div className="h-8 w-full rounded-lg bg-gray-800/60" />
-      </div>
-    </div>
+    <>
+      <tr
+        onClick={() => hasDetails && setOpen((v) => !v)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{ height: 36, borderBottom: "1px solid #1e2d47", cursor: hasDetails ? "pointer" : "default", background: open ? "rgba(29,111,164,0.06)" : hovered ? "rgba(255,255,255,0.02)" : "transparent" }}
+      >
+        <td style={{ padding: "0 16px", fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {hasDetails && <ChevronRight size={12} style={{ color: "#2d8fce", transition: "transform 0.15s", transform: open ? "rotate(90deg)" : "none" }} />}
+            <time dateTime={entry.created_at}>{relativeTime(entry.created_at)}</time>
+          </span>
+        </td>
+        <td style={{ padding: "0 16px", fontSize: 13, color: "#cbd5e1" }}>{entry.actor}</td>
+        <td style={{ padding: "0 16px" }}><Chip label={aLabel} color={aColor} bg={aBg} /></td>
+        <td style={{ padding: "0 16px" }}><Chip label={entry.resource_type} color={rColor} bg={rBg} /></td>
+        <td style={{ padding: "0 16px", maxWidth: 180 }}>
+          <span className="mono" style={{ fontSize: 12, color: "#64748b", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={entry.resource_id}>
+            {entry.resource_id}
+          </span>
+        </td>
+        <td style={{ padding: "0 16px", textAlign: "center" }}>
+          {hasDetails
+            ? <ChevronDown size={14} style={{ color: "#2d8fce", transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+            : <span style={{ color: "#2a3f5e" }}>—</span>}
+        </td>
+      </tr>
+      {open && hasDetails && (
+        <tr style={{ background: "rgba(10,15,26,0.4)" }}>
+          <td colSpan={6} style={{ padding: "4px 16px 10px" }}>
+            <div style={{ background: "rgba(10,15,26,0.6)", border: "1px solid #1e2d47", borderRadius: 6, padding: "8px 12px", display: "flex", flexWrap: "wrap", gap: "4px 16px" }}>
+              {Object.entries(entry.details as Record<string, unknown>).map(([k, v]) => (
+                <span key={k} style={{ fontSize: 12 }}>
+                  <span style={{ color: "#475569" }}>{k}:</span>{" "}
+                  <span style={{ color: "#94a3b8" }}>{String(v)}</span>
+                </span>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: page component with filters, pagination, and timeline rendering
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: page component with filters, table, and pagination
 export default function Audit() {
   const [page, setPage] = useState(1);
   const [actionFilter, setActionFilter] = useState("");
@@ -97,219 +132,107 @@ export default function Audit() {
 
   const entries: AuditEntry[] = isLoading ? [] : (data?.data?.items ?? []);
   const total = data?.data?.total ?? 0;
+  const uniqueTypes = new Set(entries.map((e) => e.resource_type)).size;
 
-  function handleFilterChange(setter: (v: string) => void, value: string) {
+  function handleFilter(setter: (v: string) => void, value: string) {
     setter(value);
     setPage(1);
   }
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <div>
-        <h1 className="text-2xl font-bold text-white">Audit Log</h1>
-        <p className="mt-1 text-sm text-gray-400">Activity timeline and compliance tracking</p>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Audit Log</h1>
+        <p style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Activity history and compliance tracking</p>
       </div>
 
       {error && (
-        <div
-          role="alert"
-          className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-400"
-        >
-          Failed to load audit log. Please try refreshing.
+        <div role="alert" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171" }}>
+          Failed to load audit log. Please refresh.
         </div>
       )}
 
-      {/* Summary stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" aria-label="Audit summary">
-        <div className="card p-4 text-center">
-          <p className="text-2xl font-bold text-white" aria-label={`${total} total events`}>
-            {isLoading ? (
-              <span
-                className="inline-block h-8 w-8 rounded bg-gray-800 animate-pulse"
-                aria-hidden="true"
-              />
-            ) : (
-              total
-            )}
-          </p>
-          <p className="text-xs text-gray-400">Total Events</p>
-        </div>
-        <div className="card p-4 text-center">
-          <p className="text-2xl font-bold text-indigo-400">
-            {isLoading ? (
-              <span
-                className="inline-block h-8 w-8 rounded bg-gray-800 animate-pulse"
-                aria-hidden="true"
-              />
-            ) : (
-              entries.length
-            )}
-          </p>
-          <p className="text-xs text-gray-400">This Page</p>
-        </div>
-        <div className="card p-4 text-center">
-          <p className="text-2xl font-bold text-emerald-400">
-            {isLoading ? (
-              <span
-                className="inline-block h-8 w-8 rounded bg-gray-800 animate-pulse"
-                aria-hidden="true"
-              />
-            ) : (
-              new Set(entries.map((e) => e.resource_type)).size
-            )}
-          </p>
-          <p className="text-xs text-gray-400">Resource Types</p>
-        </div>
+      {/* Stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 16, maxWidth: 400 }}>
+        {([
+          ["Total Events", isLoading, total, "#f1f5f9"],
+          ["Resource Types", isLoading, uniqueTypes, "#0fb89a"],
+        ] as [string, boolean, number, string][]).map(([label, loading, val, color]) => (
+          <div key={label} className="card" style={{ padding: 16, textAlign: "center" }}>
+            <p style={{ fontSize: 28, fontWeight: 700, color, margin: 0 }}>
+              {loading ? <span style={{ display: "inline-block", width: 36, height: 26, background: "#1e2d47", borderRadius: 4 }} /> : val}
+            </p>
+            <p className="section-label" style={{ marginTop: 4 }}>{label}</p>
+          </div>
+        ))}
       </div>
 
       {/* Filter bar */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative">
-          <select
-            value={actionFilter}
-            onChange={(e) => handleFilterChange(setActionFilter, e.target.value)}
-            className="appearance-none rounded-lg border border-gray-700 bg-gray-900 pl-3 pr-8 py-2 text-sm text-gray-300 focus:border-indigo-500 focus:outline-none hover:border-gray-600 transition-colors cursor-pointer"
-            aria-label="Filter by action"
-          >
-            {ACTION_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
-        </div>
-
-        <div className="relative">
-          <select
-            value={resourceTypeFilter}
-            onChange={(e) => handleFilterChange(setResourceTypeFilter, e.target.value)}
-            className="appearance-none rounded-lg border border-gray-700 bg-gray-900 pl-3 pr-8 py-2 text-sm text-gray-300 focus:border-indigo-500 focus:outline-none hover:border-gray-600 transition-colors cursor-pointer"
-            aria-label="Filter by resource type"
-          >
-            {RESOURCE_TYPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
-        </div>
-
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        {([
+          [ACTION_OPTIONS, actionFilter, setActionFilter, "Filter by action"],
+          [RESOURCE_TYPE_OPTIONS, resourceTypeFilter, setResourceTypeFilter, "Filter by resource type"],
+        ] as [typeof ACTION_OPTIONS, string, (v: string) => void, string][]).map(([opts, val, setter, label]) => (
+          <div key={label} style={{ position: "relative" }}>
+            <select value={val} onChange={(e) => handleFilter(setter, e.target.value)} style={SELECT_STYLE} aria-label={label}>
+              {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <ChevronDown size={13} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "#475569", pointerEvents: "none" }} />
+          </div>
+        ))}
         {(actionFilter || resourceTypeFilter) && (
-          <button
-            type="button"
-            onClick={() => {
-              setActionFilter("");
-              setResourceTypeFilter("");
-              setPage(1);
-            }}
-            className="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-colors"
-          >
+          <button type="button" className="btn-secondary" style={{ fontSize: 13, padding: "6px 12px" }} onClick={() => { setActionFilter(""); setResourceTypeFilter(""); setPage(1); }}>
             Clear filters
           </button>
         )}
       </div>
 
-      {/* Timeline */}
-      <div className="card overflow-hidden">
-        <div className="border-b border-gray-800 px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Shield className="h-4 w-4 text-gray-400" aria-hidden="true" />
-            <h2 className="font-semibold text-white">Activity Timeline</h2>
-          </div>
+      {/* Table */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+            <colgroup>
+              <col style={{ width: 120 }} /><col style={{ width: 160 }} /><col style={{ width: 130 }} />
+              <col style={{ width: 140 }} /><col style={{ width: 180 }} /><col style={{ width: 70 }} />
+            </colgroup>
+            <thead>
+              <tr style={{ position: "sticky", top: 0, background: "#0f1724", borderBottom: "1px solid #1e2d47" }}>
+                {COL_HEADERS.map((h) => (
+                  <th key={h} className="table-header" style={{ padding: "10px 16px", textAlign: "left" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading
+                ? Array.from({ length: 8 }).map((_, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: skeleton rows
+                  <tr key={i} style={{ height: 36, borderBottom: "1px solid #1e2d47" }}>
+                    {COL_HEADERS.map((h) => (
+                      <td key={h} style={{ padding: "0 16px" }}>
+                        <span className="animate-pulse" style={{ display: "block", height: 12, background: "#1e2d47", borderRadius: 3, width: h === "Details" ? 20 : "65%" }} />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+                : entries.length === 0
+                  ? (
+                    <tr><td colSpan={6} style={{ padding: 48, textAlign: "center" }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#18243a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Shield size={20} color="#2a3f5e" />
+                        </div>
+                        <p style={{ fontSize: 14, color: "#475569", margin: 0 }}>
+                          {actionFilter || resourceTypeFilter ? "No entries match the current filters." : "No audit entries yet."}
+                        </p>
+                      </div>
+                    </td></tr>
+                  )
+                  : entries.map((entry) => <AuditRow key={entry.id} entry={entry} />)}
+            </tbody>
+          </table>
         </div>
-
-        {isLoading ? (
-          <div aria-label="Loading audit entries">
-            {Array.from({ length: 5 }).map((_, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders
-              <SkeletonRow key={i} />
-            ))}
-          </div>
-        ) : entries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="rounded-full bg-gray-800 p-4">
-              <Shield className="h-6 w-6 text-gray-500" aria-hidden="true" />
-            </div>
-            <h2 className="mt-4 text-base font-semibold text-gray-300">No audit entries</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              {actionFilter || resourceTypeFilter
-                ? "No entries match the current filters."
-                : "Activity will appear here as actions are performed."}
-            </p>
-          </div>
-        ) : (
-          <div className="relative">
-            {/* Timeline line */}
-            <div
-              className="absolute left-[39px] top-0 bottom-0 w-px bg-gray-800"
-              aria-hidden="true"
-            />
-
-            {entries.map((entry, i) => {
-              const ActionIcon = actionIcons[entry.action] ?? Shield;
-
-              return (
-                <div
-                  key={entry.id}
-                  className={clsx(
-                    "relative flex gap-4 px-6 py-4 transition-colors hover:bg-gray-800/20",
-                    i !== entries.length - 1 && "border-b border-gray-800/40"
-                  )}
-                >
-                  {/* Timeline dot */}
-                  <div
-                    className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/10"
-                    aria-hidden="true"
-                  >
-                    <ActionIcon className="h-3.5 w-3.5 text-indigo-400" />
-                  </div>
-
-                  {/* Content */}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-white text-sm">
-                            {entry.action
-                              .replace(/_/g, " ")
-                              .replace(/\b\w/g, (c) => c.toUpperCase())}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-                          <User className="h-3 w-3" aria-hidden="true" />
-                          <span>{entry.actor}</span>
-                          <span aria-hidden="true">&middot;</span>
-                          <span>
-                            {entry.resource_type}/{entry.resource_id}
-                          </span>
-                        </div>
-                      </div>
-                      <time dateTime={entry.created_at} className="shrink-0 text-xs text-gray-500">
-                        {formatTime(entry.created_at)}
-                      </time>
-                    </div>
-
-                    {entry.details && Object.keys(entry.details).length > 0 && (
-                      <div className="mt-2 rounded-lg bg-gray-950/60 px-3 py-2 text-xs text-gray-400">
-                        {Object.entries(entry.details).map(([k, v]) => (
-                          <span key={k} className="mr-3">
-                            <span className="text-gray-500">{k}:</span>{" "}
-                            <span className="text-gray-300">{String(v)}</span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {!isLoading && total > PAGE_SIZE && (
-          <div className="border-t border-gray-800 px-6">
+        {!isLoading && total > 0 && (
+          <div style={{ borderTop: "1px solid #1e2d47", padding: "0 16px" }}>
             <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
           </div>
         )}

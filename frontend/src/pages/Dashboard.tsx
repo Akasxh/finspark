@@ -5,11 +5,12 @@ import {
   AlertTriangle,
   CheckCircle2,
   FileText,
-  FlaskConical,
+  HeartPulse,
   Plug,
   Settings,
-  TrendingUp,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { CSSProperties } from "react";
 import {
   Area,
   AreaChart,
@@ -25,17 +26,33 @@ import {
   YAxis,
 } from "recharts";
 
-const SAMPLE_ACTIVITY_DATA = [
-  { name: "Mon", documents: 12, simulations: 4 },
-  { name: "Tue", documents: 19, simulations: 7 },
-  { name: "Wed", documents: 8, simulations: 3 },
-  { name: "Thu", documents: 24, simulations: 9 },
-  { name: "Fri", documents: 16, simulations: 6 },
-  { name: "Sat", documents: 5, simulations: 2 },
-  { name: "Sun", documents: 3, simulations: 1 },
+// ── Constants ──────────────────────────────────────────────────────────────
+
+const BRAND = "#2d8fce";
+const TEAL = "#0fb89a";
+const TEAL_DIM = "#0d9e85";
+const GRAY_STATUS = "#475569";
+const ERROR_COLOR = "#f87171";
+
+const CHART_TOOLTIP_STYLE: CSSProperties = {
+  backgroundColor: "var(--color-bg-raised)",
+  border: "1px solid var(--color-border-strong)",
+  borderRadius: "6px",
+  fontSize: "12px",
+  color: "var(--color-text-primary)",
+};
+
+const SAMPLE_ACTIVITY: Array<{ name: string; documents: number; configs: number }> = [
+  { name: "Mon", documents: 12, configs: 4 },
+  { name: "Tue", documents: 19, configs: 7 },
+  { name: "Wed", documents: 8, configs: 3 },
+  { name: "Thu", documents: 24, configs: 9 },
+  { name: "Fri", documents: 16, configs: 6 },
+  { name: "Sat", documents: 5, configs: 2 },
+  { name: "Sun", documents: 3, configs: 1 },
 ];
 
-const SAMPLE_THROUGHPUT_DATA = [
+const SAMPLE_THROUGHPUT: Array<{ hour: string; records: number }> = [
   { hour: "00:00", records: 1200 },
   { hour: "04:00", records: 800 },
   { hour: "08:00", records: 2400 },
@@ -44,279 +61,349 @@ const SAMPLE_THROUGHPUT_DATA = [
   { hour: "20:00", records: 1800 },
 ];
 
-const STATUS_COLORS: Record<string, string> = {
-  Active: "#10b981",
-  Inactive: "#6b7280",
-  Error: "#ef4444",
-};
+const PIE_FALLBACK = [
+  { name: "Active", value: 8, color: TEAL },
+  { name: "Inactive", value: 3, color: GRAY_STATUS },
+  { name: "Error", value: 1, color: ERROR_COLOR },
+];
 
-interface MetricCardProps {
-  title: string;
-  value: string | number;
-  subtitle: string;
-  icon: React.ComponentType<{ className?: string }>;
-  trend?: string;
-  color: string;
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function formatLarge(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
-function MetricCard({ title, value, subtitle, icon: Icon, trend, color }: MetricCardProps) {
-  return (
-    <div className="card-hover p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm text-gray-400">{title}</p>
-          <p className="mt-2 text-3xl font-bold text-white">{value}</p>
-          <p className="mt-1 text-xs text-gray-500">{subtitle}</p>
-        </div>
-        <div className={`rounded-lg p-2.5 ${color}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-      {trend && (
-        <div className="mt-3 flex items-center gap-1 text-xs text-emerald-400">
-          <TrendingUp className="h-3 w-3" />
-          {trend}
-        </div>
-      )}
-    </div>
-  );
+function computeHealthScore(
+  adapterTotal: number,
+  activeAdapters: number,
+  configCount: number,
+  warnings: number
+): number {
+  if (adapterTotal === 0 && configCount === 0) return 100;
+  const activeRatio = adapterTotal > 0 ? activeAdapters / adapterTotal : 1;
+  const warnPenalty = Math.min(warnings * 2, 30);
+  return Math.round(activeRatio * 100 - warnPenalty);
 }
 
-function formatProcessed(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k processed` : `${n} processed`;
-}
-
-function resolveChartSeries<T>(
-  raw: T[] | undefined,
-  fallback: T[]
-): { data: T[]; isSample: boolean } {
-  const hasData = raw && raw.length > 0;
-  return { data: hasData ? raw : fallback, isSample: !hasData };
-}
-
-function buildAdapterPieData(adapterList: Array<{ is_active: boolean; status?: string }>) {
-  const counts: Record<string, number> = { Active: 0, Inactive: 0, Error: 0 };
-  for (const a of adapterList) {
-    if (a.is_active) counts.Active++;
-    else if (a.status === "error") counts.Error++;
+function buildPieData(adapters: Array<{ is_active: boolean; status?: string }>) {
+  const counts = { Active: 0, Inactive: 0, Error: 0 };
+  for (const a of adapters) {
+    if (a.status === "error") counts.Error++;
+    else if (a.is_active) counts.Active++;
     else counts.Inactive++;
   }
   return Object.entries(counts)
     .filter(([, v]) => v > 0)
-    .map(([name, value]) => ({ name, value, color: STATUS_COLORS[name] ?? "#6b7280" }));
+    .map(([name, value]) => ({
+      name,
+      value,
+      color: name === "Active" ? TEAL : name === "Error" ? ERROR_COLOR : GRAY_STATUS,
+    }));
 }
 
-const FALLBACK_PIE = [
-  { name: "Active", value: 8, color: STATUS_COLORS.Active },
-  { name: "Inactive", value: 3, color: STATUS_COLORS.Inactive },
-  { name: "Error", value: 1, color: STATUS_COLORS.Error },
-];
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+interface KpiCardProps {
+  title: string;
+  value: string | number;
+  subtitle: string;
+  icon: LucideIcon;
+  iconBg: string;
+  iconColor: string;
+  delay: number;
+}
+
+function KpiCard({ title, value, subtitle, icon: Icon, iconBg, iconColor, delay }: KpiCardProps) {
+  return (
+    <div
+      className="card-hover animate-fade-in p-5"
+      style={{ animationDelay: `${delay}ms`, animationFillMode: "both" }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="metric-label">{title}</p>
+          <p className="metric-value mt-2">{value}</p>
+          <p style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "4px" }}>
+            {subtitle}
+          </p>
+        </div>
+        <div
+          style={{
+            borderRadius: "8px",
+            padding: "10px",
+            backgroundColor: iconBg,
+            color: iconColor,
+            flexShrink: 0,
+          }}
+        >
+          <Icon size={18} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const adapters = useQuery({ queryKey: ["adapters"], queryFn: () => adaptersApi.list() });
-  const documents = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
-  const configs = useQuery({
+  const adaptersQ = useQuery({ queryKey: ["adapters"], queryFn: () => adaptersApi.list() });
+  const documentsQ = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
+  const configsQ = useQuery({
     queryKey: ["configurations"],
     queryFn: () => configurationsApi.list(),
   });
-  const analytics = useQuery({
+  const analyticsQ = useQuery({
     queryKey: ["analytics", "dashboard"],
     queryFn: () => analyticsApi.dashboard(),
     retry: false,
   });
 
-  const adapterCount = adapters.data?.data?.total ?? 0;
-  const docCount = documents.data?.data?.length ?? 0;
-  const configCount = configs.data?.data?.length ?? 0;
+  // Derived counts
+  const adapterList = adaptersQ.data?.data?.adapters ?? [];
+  const adapterTotal = adaptersQ.data?.data?.total ?? 0;
+  const activeAdapters = adapterList.filter((a) => a.is_active).length;
+  const docCount = documentsQ.data?.data?.length ?? 0;
+  const configCount = configsQ.data?.data?.length ?? 0;
 
-  const analyticsData = analytics.data?.data;
+  // Analytics
+  const analyticsData = analyticsQ.data?.data;
+  const totalWarnings = analyticsData?.total_warnings ?? 0;
+  const totalProcessed = analyticsData?.total_processed ?? 0;
 
-  const activity = resolveChartSeries(analyticsData?.weekly_activity, SAMPLE_ACTIVITY_DATA);
-  const activityData = activity.data;
-  const activityLabel = activity.isSample
-    ? "Documents & simulations processed (Sample data)"
-    : "Documents & simulations processed";
+  // Health score (computed, not hardcoded)
+  const healthScore = computeHealthScore(adapterTotal, activeAdapters, configCount, totalWarnings);
+  const healthColor = healthScore >= 80 ? TEAL : healthScore >= 50 ? "#fbbf24" : ERROR_COLOR;
+  const healthBg =
+    healthScore >= 80
+      ? "var(--color-teal-subtle)"
+      : healthScore >= 50
+        ? "rgba(251,191,36,0.12)"
+        : "rgba(248,113,113,0.12)";
 
-  const throughput = resolveChartSeries(analyticsData?.throughput, SAMPLE_THROUGHPUT_DATA);
-  const throughputData = throughput.data;
-  const throughputLabel = throughput.isSample
-    ? "Records processed per hour (Sample data)"
-    : "Records processed per hour (today)";
+  // Chart data with sample fallback
+  const rawActivity = analyticsData?.weekly_activity;
+  const activityData =
+    rawActivity && rawActivity.length > 0
+      ? rawActivity.map((d) => ({ name: d.name, documents: d.documents, configs: d.simulations }))
+      : SAMPLE_ACTIVITY;
+  const activityIsSample = !rawActivity || rawActivity.length === 0;
 
-  const totalProcessed = analyticsData?.total_processed ?? 12200;
-  const totalWarnings = analyticsData?.total_warnings ?? 23;
-  const processedLabel = formatProcessed(totalProcessed);
+  const rawThroughput = analyticsData?.throughput;
+  const throughputData = rawThroughput && rawThroughput.length > 0 ? rawThroughput : SAMPLE_THROUGHPUT;
+  const throughputIsSample = !rawThroughput || rawThroughput.length === 0;
 
-  const adapterList = adapters.data?.data?.adapters ?? [];
-  const statusData = buildAdapterPieData(adapterList);
-  const pieData = statusData.length > 0 ? statusData : FALLBACK_PIE;
-  const pieSubtitle =
-    statusData.length === 0 ? "Current distribution (Sample data)" : "Current distribution";
+  // Pie data
+  const pieSlices = buildPieData(adapterList);
+  const pieData = pieSlices.length > 0 ? pieSlices : PIE_FALLBACK;
+  const pieIsSample = pieSlices.length === 0;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="mt-1 text-sm text-gray-400">Integration platform overview and metrics</p>
+      {/* Header */}
+      <div className="animate-fade-in">
+        <h1 style={{ fontSize: "22px", fontWeight: 700, color: "var(--color-text-primary)" }}>
+          Dashboard
+        </h1>
+        <p style={{ marginTop: "2px", fontSize: "13px", color: "var(--color-text-secondary)" }}>
+          Integration platform overview
+        </p>
       </div>
 
-      {/* Metric cards */}
+      {/* KPI row */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
+        <KpiCard
           title="Active Adapters"
-          value={adapterCount}
-          subtitle="Integration connectors"
+          value={activeAdapters}
+          subtitle={adapterTotal > 0 ? `${adapterTotal} total connectors` : "Integration connectors"}
           icon={Plug}
-          trend="+2 this week"
-          color="bg-indigo-500/10 text-indigo-400"
+          iconBg="var(--color-brand-subtle)"
+          iconColor="var(--color-brand-light)"
+          delay={0}
         />
-        <MetricCard
+        <KpiCard
           title="Documents"
           value={docCount}
           subtitle="Uploaded & processed"
           icon={FileText}
-          trend="+18 today"
-          color="bg-emerald-500/10 text-emerald-400"
+          iconBg="var(--color-teal-subtle)"
+          iconColor={TEAL}
+          delay={60}
         />
-        <MetricCard
+        <KpiCard
           title="Configurations"
           value={configCount}
-          subtitle="Active configs"
+          subtitle="Active mappings"
           icon={Settings}
-          color="bg-amber-500/10 text-amber-400"
+          iconBg="rgba(251,191,36,0.10)"
+          iconColor="#fbbf24"
+          delay={120}
         />
-        <MetricCard
-          title="Simulations"
-          value="—"
-          subtitle="Run from Simulations tab"
-          icon={FlaskConical}
-          color="bg-purple-500/10 text-purple-400"
+        <KpiCard
+          title="Health Score"
+          value={`${healthScore}%`}
+          subtitle={`${totalWarnings} warning${totalWarnings !== 1 ? "s" : ""} detected`}
+          icon={HeartPulse}
+          iconBg={healthBg}
+          iconColor={healthColor}
+          delay={180}
         />
       </div>
 
-      {/* Charts row */}
+      {/* Charts row: activity + pie */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Activity chart */}
-        <div className="card p-6 lg:col-span-2">
+        {/* Weekly Activity */}
+        <div
+          className="card animate-fade-in p-5 lg:col-span-2"
+          style={{ animationDelay: "220ms", animationFillMode: "both" }}
+        >
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="font-semibold text-white">Weekly Activity</h2>
-              <p className="text-xs text-gray-400">{activityLabel}</p>
+              <h2 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text-primary)" }}>
+                Weekly Activity
+              </h2>
+              <p style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "2px" }}>
+                Documents &amp; configurations processed
+                {activityIsSample && (
+                  <span style={{ color: "var(--color-warning-text)", marginLeft: "6px" }}>
+                    · sample data
+                  </span>
+                )}
+              </p>
             </div>
-            <Activity className="h-4 w-4 text-gray-500" aria-hidden="true" />
+            <Activity size={16} style={{ color: "var(--color-text-muted)" }} aria-hidden />
           </div>
-          <div className="h-64">
+          <div style={{ height: "220px" }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={activityData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis dataKey="name" stroke="#6b7280" fontSize={12} />
-                <YAxis stroke="#6b7280" fontSize={12} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#111827",
-                    border: "1px solid #374151",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                  }}
-                />
-                <Bar dataKey="documents" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="simulations" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+              <BarChart data={activityData} barGap={4}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                <XAxis dataKey="name" stroke="var(--color-text-muted)" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--color-text-muted)" fontSize={11} tickLine={false} axisLine={false} width={28} />
+                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
+                <Bar dataKey="documents" fill={BRAND} radius={[3, 3, 0, 0]} name="Documents" />
+                <Bar dataKey="configs" fill={TEAL_DIM} radius={[3, 3, 0, 0]} name="Configs" />
               </BarChart>
             </ResponsiveContainer>
           </div>
+          <div className="mt-3 flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: BRAND, display: "inline-block" }} />
+              <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>Documents</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: TEAL_DIM, display: "inline-block" }} />
+              <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>Configs</span>
+            </div>
+          </div>
         </div>
 
-        {/* Status pie */}
-        <div className="card p-6">
+        {/* Adapter Status donut */}
+        <div
+          className="card animate-fade-in p-5"
+          style={{ animationDelay: "260ms", animationFillMode: "both" }}
+        >
           <div className="mb-4">
-            <h2 className="font-semibold text-white">Adapter Status</h2>
-            <p className="text-xs text-gray-400">{pieSubtitle}</p>
+            <h2 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text-primary)" }}>
+              Adapter Status
+            </h2>
+            <p style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "2px" }}>
+              {pieIsSample ? "Distribution · sample data" : "Current distribution"}
+            </p>
           </div>
-          <div className="h-48">
+          <div style={{ height: "160px" }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={pieData}
                   cx="50%"
                   cy="50%"
-                  innerRadius={50}
-                  outerRadius={75}
-                  paddingAngle={4}
+                  innerRadius={48}
+                  outerRadius={72}
+                  paddingAngle={3}
                   dataKey="value"
+                  strokeWidth={0}
                 >
                   {pieData.map((entry) => (
                     <Cell key={entry.name} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#111827",
-                    border: "1px solid #374151",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                  }}
-                />
+                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-2 space-y-2">
+          <div className="mt-3 space-y-2">
             {pieData.map((s) => (
-              <div key={s.name} className="flex items-center justify-between text-xs">
+              <div key={s.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                  <span className="text-gray-400">{s.name}</span>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: s.color }} />
+                  <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                    {s.name}
+                  </span>
                 </div>
-                <span className="font-medium text-gray-300">{s.value}</span>
+                <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>
+                  {s.value}
+                </span>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Throughput chart */}
-      <div className="card p-6">
+      {/* Data Throughput area chart */}
+      <div
+        className="card animate-fade-in p-5"
+        style={{ animationDelay: "300ms", animationFillMode: "both" }}
+      >
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="font-semibold text-white">Data Throughput</h2>
-            <p className="text-xs text-gray-400">{throughputLabel}</p>
+            <h2 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text-primary)" }}>
+              Data Throughput
+            </h2>
+            <p style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "2px" }}>
+              Records processed per hour
+              {throughputIsSample && (
+                <span style={{ color: "var(--color-warning-text)", marginLeft: "6px" }}>
+                  · sample data
+                </span>
+              )}
+            </p>
           </div>
-          <div className="flex items-center gap-4 text-xs">
+          <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
-              <span className="text-gray-400">{processedLabel}</span>
+              <CheckCircle2 size={13} style={{ color: TEAL }} aria-hidden />
+              <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                {formatLarge(totalProcessed)} processed
+              </span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" aria-hidden="true" />
-              <span className="text-gray-400">{totalWarnings} warnings</span>
-            </div>
+            {totalWarnings > 0 && (
+              <div className="flex items-center gap-1.5">
+                <AlertTriangle size={13} style={{ color: "var(--color-warning-text)" }} aria-hidden />
+                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                  {totalWarnings} warnings
+                </span>
+              </div>
+            )}
           </div>
         </div>
-        <div className="h-56">
+        <div style={{ height: "200px" }}>
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={throughputData}>
               <defs>
-                <linearGradient id="throughputGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                <linearGradient id="tpGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={BRAND} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={BRAND} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="hour" stroke="#6b7280" fontSize={12} />
-              <YAxis stroke="#6b7280" fontSize={12} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#111827",
-                  border: "1px solid #374151",
-                  borderRadius: "8px",
-                  fontSize: "12px",
-                }}
-              />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+              <XAxis dataKey="hour" stroke="var(--color-text-muted)" fontSize={11} tickLine={false} axisLine={false} />
+              <YAxis stroke="var(--color-text-muted)" fontSize={11} tickLine={false} axisLine={false} width={40} />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
               <Area
                 type="monotone"
                 dataKey="records"
-                stroke="#6366f1"
+                stroke={BRAND}
                 strokeWidth={2}
-                fill="url(#throughputGrad)"
+                fill="url(#tpGrad)"
+                name="Records"
               />
             </AreaChart>
           </ResponsiveContainer>

@@ -1,4 +1,3 @@
-import clsx from "clsx";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface PaginationProps {
@@ -18,13 +17,19 @@ export default function Pagination({ page, pageSize, total, onPageChange }: Pagi
   if (total === 0) return null;
 
   return (
-    <div className="flex items-center justify-between px-1 py-3">
-      <p className="text-sm text-gray-500">
+    <div
+      className="flex items-center justify-between px-4 py-3"
+      style={{ borderTop: "1px solid var(--color-border)" }}
+    >
+      <p className="text-[13px]" style={{ color: "var(--color-text-muted)" }}>
         Showing{" "}
-        <span className="font-medium text-gray-300">
+        <span className="font-medium" style={{ color: "var(--color-text-secondary)" }}>
           {start}–{end}
         </span>{" "}
-        of <span className="font-medium text-gray-300">{total}</span>
+        of{" "}
+        <span className="font-medium" style={{ color: "var(--color-text-secondary)" }}>
+          {total}
+        </span>
       </p>
 
       <div className="flex items-center gap-2">
@@ -33,18 +38,22 @@ export default function Pagination({ page, pageSize, total, onPageChange }: Pagi
           onClick={() => onPageChange(page - 1)}
           disabled={!hasPrev}
           aria-label="Previous page"
-          className={clsx(
-            "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-            hasPrev
-              ? "border-gray-700 text-gray-300 hover:border-gray-600 hover:bg-gray-800/60 hover:text-white"
-              : "cursor-not-allowed border-gray-800 text-gray-600"
-          )}
+          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors"
+          style={{
+            border: `1px solid ${hasPrev ? "var(--color-border-strong)" : "var(--color-border)"}`,
+            color: hasPrev ? "var(--color-text-secondary)" : "var(--color-text-muted)",
+            opacity: hasPrev ? 1 : 0.5,
+            cursor: hasPrev ? "pointer" : "not-allowed",
+          }}
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className="h-3.5 w-3.5" />
           Prev
         </button>
 
-        <span className="min-w-[60px] text-center text-sm text-gray-400">
+        <span
+          className="min-w-[60px] text-center text-[13px] tabular-nums"
+          style={{ color: "var(--color-text-muted)" }}
+        >
           {page} / {totalPages}
         </span>
 
@@ -53,15 +62,16 @@ export default function Pagination({ page, pageSize, total, onPageChange }: Pagi
           onClick={() => onPageChange(page + 1)}
           disabled={!hasNext}
           aria-label="Next page"
-          className={clsx(
-            "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-            hasNext
-              ? "border-gray-700 text-gray-300 hover:border-gray-600 hover:bg-gray-800/60 hover:text-white"
-              : "cursor-not-allowed border-gray-800 text-gray-600"
-          )}
+          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors"
+          style={{
+            border: `1px solid ${hasNext ? "var(--color-border-strong)" : "var(--color-border)"}`,
+            color: hasNext ? "var(--color-text-secondary)" : "var(--color-text-muted)",
+            opacity: hasNext ? 1 : 0.5,
+            cursor: hasNext ? "pointer" : "not-allowed",
+          }}
         >
           Next
-          <ChevronRight className="h-4 w-4" />
+          <ChevronRight className="h-3.5 w-3.5" />
         </button>
       </div>
     </div>

@@ -15,22 +15,37 @@ import {
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
-const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/adapters", icon: Plug, label: "Adapters" },
-  { to: "/documents", icon: FileText, label: "Documents" },
-  { to: "/configurations", icon: Settings, label: "Configurations" },
-  { to: "/simulations", icon: FlaskConical, label: "Simulations" },
-  { to: "/audit", icon: Shield, label: "Audit Log" },
-  { to: "/search", icon: Search, label: "Search" },
-  { to: "/webhooks", icon: Webhook, label: "Webhooks" },
+const navGroups = [
+  {
+    label: "Core",
+    items: [
+      { to: "/", icon: LayoutDashboard, label: "Dashboard" },
+      { to: "/documents", icon: FileText, label: "Documents" },
+      { to: "/search", icon: Search, label: "Search" },
+    ],
+  },
+  {
+    label: "Integrations",
+    items: [
+      { to: "/adapters", icon: Plug, label: "Adapters" },
+      { to: "/configurations", icon: Settings, label: "Configurations" },
+      { to: "/webhooks", icon: Webhook, label: "Webhooks" },
+    ],
+  },
+  {
+    label: "Governance",
+    items: [
+      { to: "/simulations", icon: FlaskConical, label: "Simulations" },
+      { to: "/audit", icon: Shield, label: "Audit Log" },
+    ],
+  },
 ] as const;
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "var(--color-bg-base)" }}>
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -45,75 +60,121 @@ export default function Layout() {
         />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar — 220px, navy-black */}
       <aside
         className={clsx(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-gray-800 bg-gray-950 transition-transform duration-200 lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-[220px] flex-col transition-transform duration-200 lg:static lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
+        style={{
+          backgroundColor: "var(--color-bg-base)",
+          borderRight: "1px solid var(--color-border)",
+        }}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center gap-3 border-b border-gray-800 px-6">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600">
-            <Zap className="h-4 w-4 text-white" />
+        <div
+          className="flex h-14 items-center gap-2.5 px-5"
+          style={{ borderBottom: "1px solid var(--color-border)" }}
+        >
+          <div
+            className="flex h-7 w-7 items-center justify-center rounded-md"
+            style={{ backgroundColor: "var(--color-brand)" }}
+          >
+            <Zap className="h-3.5 w-3.5 text-white" />
           </div>
-          <span className="text-lg font-bold tracking-tight text-white">FinSpark</span>
+          <span className="text-sm font-bold tracking-tight" style={{ color: "var(--color-text-primary)" }}>
+            FinSpark
+          </span>
           <button
             type="button"
             className="ml-auto lg:hidden"
             onClick={() => setSidebarOpen(false)}
             aria-label="Close sidebar"
           >
-            <X className="h-5 w-5 text-gray-400" />
+            <X className="h-4 w-4" style={{ color: "var(--color-text-secondary)" }} />
           </button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 space-y-1 px-3 py-4">
-          {navItems.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === "/"}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                clsx(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-indigo-600/10 text-indigo-400"
-                    : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-200"
-                )
-              }
-            >
-              <Icon className="h-4.5 w-4.5 shrink-0" />
-              {label}
-            </NavLink>
+        {/* Grouped Navigation */}
+        <nav className="flex-1 overflow-y-auto px-3 py-3">
+          {navGroups.map((group) => (
+            <div key={group.label} className="mb-4">
+              <p className="section-label">{group.label}</p>
+              <div className="space-y-0.5">
+                {group.items.map(({ to, icon: Icon, label }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={to === "/"}
+                    onClick={() => setSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      clsx(
+                        "flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] font-medium transition-colors",
+                        isActive
+                          ? "nav-active"
+                          : "nav-inactive"
+                      )
+                    }
+                    style={({ isActive }) =>
+                      isActive
+                        ? {
+                            backgroundColor: "var(--color-brand-subtle)",
+                            color: "var(--color-brand-light)",
+                            borderLeft: "2px solid var(--color-brand)",
+                            marginLeft: "-2px",
+                          }
+                        : {
+                            color: "var(--color-text-secondary)",
+                          }
+                    }
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
         {/* Footer */}
-        <div className="border-t border-gray-800 px-6 py-4">
-          <p className="text-xs text-gray-500">FinSpark v0.1.0</p>
-          <p className="text-xs text-gray-600">Enterprise Integration Platform</p>
+        <div className="px-5 py-3" style={{ borderTop: "1px solid var(--color-border)" }}>
+          <p className="text-[10px] font-medium" style={{ color: "var(--color-text-muted)" }}>
+            FinSpark v0.1.0
+          </p>
+          <p className="text-[10px]" style={{ color: "var(--color-text-muted)", opacity: 0.6 }}>
+            Enterprise Integration Platform
+          </p>
         </div>
       </aside>
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="flex h-16 shrink-0 items-center gap-4 border-b border-gray-800 bg-gray-950/80 px-6 backdrop-blur-sm">
+        <header
+          className="flex h-14 shrink-0 items-center gap-4 px-6 backdrop-blur-sm"
+          style={{
+            backgroundColor: "rgba(10, 15, 26, 0.8)",
+            borderBottom: "1px solid var(--color-border)",
+          }}
+        >
           <button
             type="button"
             className="lg:hidden"
             onClick={() => setSidebarOpen(true)}
             aria-label="Open navigation menu"
           >
-            <Menu className="h-5 w-5 text-gray-400" />
+            <Menu className="h-4.5 w-4.5" style={{ color: "var(--color-text-secondary)" }} />
           </button>
           <div className="flex-1" />
-          <div className="flex items-center gap-3">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs text-gray-400">System Healthy</span>
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" style={{ backgroundColor: "var(--color-teal)" }} />
+              <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: "var(--color-teal)" }} />
+            </span>
+            <span className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>
+              System Healthy
+            </span>
           </div>
         </header>
 

@@ -2,52 +2,106 @@
 
 @layer base {
   :root {
-    --color-brand: #6366f1;
-    --color-brand-light: #818cf8;
-    --color-brand-dark: #4f46e5;
-    --color-surface: #111827;
-    --color-surface-elevated: #1f2937;
+    /* Surface palette — deep navy, not generic gray */
+    --color-bg-base: #0a0f1a;
+    --color-bg-elevated: #0f1724;
+    --color-bg-raised: #18243a;
+    --color-border: #1e2d47;
+    --color-border-strong: #2a3f5e;
+
+    /* Brand — steel blue */
+    --color-brand: #1d6fa4;
+    --color-brand-light: #2d8fce;
+    --color-brand-dark: #165a85;
+    --color-brand-subtle: rgba(29, 111, 164, 0.12);
+
+    /* Signal teal — health, active, success */
+    --color-teal: #0fb89a;
+    --color-teal-subtle: rgba(15, 184, 154, 0.12);
+
+    /* Semantic status */
+    --color-success: #16a34a;
+    --color-success-text: #4ade80;
+    --color-warning: #d97706;
+    --color-warning-text: #fbbf24;
+    --color-error: #dc2626;
+    --color-error-text: #f87171;
+
+    /* Text hierarchy */
+    --color-text-primary: #e2e8f0;
+    --color-text-secondary: #94a3b8;
+    --color-text-muted: #475569;
+
+    /* Legacy compat */
+    --color-brand-old: #6366f1;
+    --color-surface: #0f1724;
+    --color-surface-elevated: #18243a;
+  }
+
+  html {
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    background-color: var(--color-bg-base);
+    color: var(--color-text-primary);
+  }
+
+  body {
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #374151 transparent;
+    scrollbar-color: #2a3f5e transparent;
+  }
+
+  /* Tabular numerals for all data */
+  table, .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
+/* ── Card utilities ── */
+
 @utility card {
-  border-radius: 0.75rem;
-  border: 1px solid rgb(31 41 55);
-  background-color: rgb(17 24 39 / 0.6);
-  backdrop-filter: blur(4px);
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-elevated);
 }
 
 @utility card-hover {
-  border-radius: 0.75rem;
-  border: 1px solid rgb(31 41 55);
-  background-color: rgb(17 24 39 / 0.6);
-  backdrop-filter: blur(4px);
-  transition: all 200ms;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-elevated);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
   &:hover {
-    border-color: rgb(99 102 241 / 0.4);
-    box-shadow: 0 10px 15px -3px rgb(99 102 241 / 0.05);
+    border-color: var(--color-border-strong);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 }
+
+/* ── Button utilities ── */
 
 @utility btn-primary {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  border-radius: 0.5rem;
-  background-color: rgb(79 70 229);
+  border-radius: 0.375rem;
+  background-color: var(--color-brand);
   padding: 0.5rem 1rem;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   line-height: 1.25rem;
   font-weight: 500;
   color: white;
-  transition: background-color 150ms;
+  transition: background-color 120ms ease;
   &:hover {
-    background-color: rgb(99 102 241);
+    background-color: var(--color-brand-light);
   }
   &:disabled {
     opacity: 0.5;
@@ -59,29 +113,52 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid rgb(55 65 81);
-  background-color: rgb(31 41 55);
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-border-strong);
+  background-color: transparent;
   padding: 0.5rem 1rem;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   line-height: 1.25rem;
   font-weight: 500;
-  color: rgb(209 213 219);
-  transition: all 150ms;
+  color: var(--color-text-secondary);
+  transition: background-color 120ms ease, color 120ms ease;
   &:hover {
-    background-color: rgb(55 65 81);
-    color: white;
+    background-color: var(--color-bg-raised);
+    color: var(--color-text-primary);
   }
 }
+
+@utility btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid transparent;
+  background-color: transparent;
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: all 120ms ease;
+  &:hover {
+    background-color: rgba(220, 38, 38, 0.1);
+    border-color: rgba(220, 38, 38, 0.3);
+    color: var(--color-error-text);
+  }
+}
+
+/* ── Badge utilities ── */
 
 @utility badge {
   display: inline-flex;
   align-items: center;
   border-radius: 9999px;
   padding: 0.125rem 0.625rem;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   line-height: 1rem;
   font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 @utility badge-green {
@@ -89,12 +166,12 @@
   align-items: center;
   border-radius: 9999px;
   padding: 0.125rem 0.625rem;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   line-height: 1rem;
   font-weight: 500;
-  background-color: rgb(16 185 129 / 0.1);
-  color: rgb(52 211 153);
-  box-shadow: inset 0 0 0 1px rgb(16 185 129 / 0.2);
+  background-color: rgba(15, 184, 154, 0.1);
+  color: #34d399;
+  box-shadow: inset 0 0 0 1px rgba(15, 184, 154, 0.2);
 }
 
 @utility badge-yellow {
@@ -102,12 +179,12 @@
   align-items: center;
   border-radius: 9999px;
   padding: 0.125rem 0.625rem;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   line-height: 1rem;
   font-weight: 500;
-  background-color: rgb(245 158 11 / 0.1);
-  color: rgb(251 191 36);
-  box-shadow: inset 0 0 0 1px rgb(245 158 11 / 0.2);
+  background-color: rgba(217, 119, 6, 0.1);
+  color: #fbbf24;
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.2);
 }
 
 @utility badge-red {
@@ -115,12 +192,12 @@
   align-items: center;
   border-radius: 9999px;
   padding: 0.125rem 0.625rem;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   line-height: 1rem;
   font-weight: 500;
-  background-color: rgb(239 68 68 / 0.1);
-  color: rgb(248 113 113);
-  box-shadow: inset 0 0 0 1px rgb(239 68 68 / 0.2);
+  background-color: rgba(220, 38, 38, 0.1);
+  color: #f87171;
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.2);
 }
 
 @utility badge-blue {
@@ -128,12 +205,12 @@
   align-items: center;
   border-radius: 9999px;
   padding: 0.125rem 0.625rem;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   line-height: 1rem;
   font-weight: 500;
-  background-color: rgb(59 130 246 / 0.1);
-  color: rgb(96 165 250);
-  box-shadow: inset 0 0 0 1px rgb(59 130 246 / 0.2);
+  background-color: rgba(29, 111, 164, 0.1);
+  color: #60a5fa;
+  box-shadow: inset 0 0 0 1px rgba(29, 111, 164, 0.2);
 }
 
 @utility badge-gray {
@@ -141,10 +218,128 @@
   align-items: center;
   border-radius: 9999px;
   padding: 0.125rem 0.625rem;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   line-height: 1rem;
   font-weight: 500;
-  background-color: rgb(107 114 128 / 0.1);
-  color: rgb(156 163 175);
-  box-shadow: inset 0 0 0 1px rgb(107 114 128 / 0.2);
+  background-color: rgba(71, 85, 105, 0.15);
+  color: #94a3b8;
+  box-shadow: inset 0 0 0 1px rgba(71, 85, 105, 0.2);
+}
+
+@utility badge-teal {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.125rem 0.625rem;
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 500;
+  background-color: rgba(15, 184, 154, 0.1);
+  color: #2dd4bf;
+  box-shadow: inset 0 0 0 1px rgba(15, 184, 154, 0.2);
+}
+
+/* ── Status dot + label pattern ── */
+
+@utility status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* ── Table utilities ── */
+
+@utility table-header {
+  padding: 0 1rem;
+  height: 2.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+@utility table-row {
+  height: 3rem;
+  border-bottom: 1px solid var(--color-border);
+  transition: background-color 100ms ease;
+  &:hover {
+    background-color: var(--color-bg-raised);
+  }
+}
+
+@utility table-row-compact {
+  height: 2.25rem;
+  border-bottom: 1px solid var(--color-border);
+  transition: background-color 100ms ease;
+  &:hover {
+    background-color: var(--color-bg-raised);
+  }
+}
+
+/* ── Metric value styling ── */
+
+@utility metric-value {
+  font-size: 1.875rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  color: var(--color-text-primary);
+}
+
+@utility metric-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* ── Section label (nav groups, filter sections) ── */
+
+@utility section-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  padding: 0.5rem 0.75rem 0.25rem;
+}
+
+/* ── Monospace for data values ── */
+
+@utility mono {
+  font-family: "IBM Plex Mono", "Fira Code", monospace;
+  font-size: 0.8125rem;
+}
+
+/* ── Animations ── */
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes row-appear {
+  from { background-color: rgba(29, 111, 164, 0.08); }
+  to { background-color: transparent; }
+}
+
+@utility animate-fade-in {
+  animation: fade-in 200ms ease-out;
+}
+
+@utility animate-slide-in {
+  animation: slide-in 200ms ease-out;
 }

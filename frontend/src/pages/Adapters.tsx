@@ -1,207 +1,10 @@
 import { adaptersApi } from "@/lib/api";
 import type { Adapter, AdapterVersion } from "@/types";
 import { useQuery } from "@tanstack/react-query";
-import clsx from "clsx";
-import { ChevronDown, Clock, Link2, Plug, RefreshCw, Shield, X } from "lucide-react";
+import { ChevronDown, GitBranch, Globe, Plug, RefreshCw, Shield, X, Zap } from "lucide-react";
 import { useState } from "react";
 
-function methodBadgeCls(method: string): string {
-  if (method === "GET") return "bg-emerald-500/15 text-emerald-400";
-  if (method === "POST") return "bg-blue-500/15 text-blue-400";
-  if (method === "PUT" || method === "PATCH") return "bg-amber-500/15 text-amber-400";
-  if (method === "DELETE") return "bg-red-500/15 text-red-400";
-  return "bg-gray-500/15 text-gray-400";
-}
-
-const categoryColors: Record<string, string> = {
-  bureau: "text-blue-400 bg-blue-500/10",
-  kyc: "text-purple-400 bg-purple-500/10",
-  gst: "text-emerald-400 bg-emerald-500/10",
-  payment: "text-amber-400 bg-amber-500/10",
-  fraud: "text-rose-400 bg-rose-500/10",
-  notification: "text-cyan-400 bg-cyan-500/10",
-  open_banking: "text-indigo-400 bg-indigo-500/10",
-};
-
-function formatTimeAgo(dateStr?: string): string {
-  if (!dateStr) return "Never";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
-function SkeletonCard() {
-  return (
-    <div className="card-hover p-5 animate-pulse" aria-hidden="true">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-gray-800" />
-          <div className="space-y-2">
-            <div className="h-4 w-28 rounded bg-gray-800" />
-            <div className="h-3 w-16 rounded bg-gray-800" />
-          </div>
-        </div>
-        <div className="h-5 w-14 rounded-full bg-gray-800" />
-      </div>
-      <div className="mt-3 space-y-1.5">
-        <div className="h-3 w-full rounded bg-gray-800" />
-        <div className="h-3 w-4/5 rounded bg-gray-800" />
-      </div>
-      <div className="mt-4 flex items-center justify-between border-t border-gray-800 pt-3">
-        <div className="h-3 w-16 rounded bg-gray-800" />
-        <div className="h-3 w-10 rounded bg-gray-800" />
-      </div>
-    </div>
-  );
-}
-
-function VersionPanel({ version }: { version: AdapterVersion }) {
-  const [open, setOpen] = useState(false);
-  const statusCls = version.status === "active" ? "badge-green" : "badge-gray";
-
-  return (
-    <div className="border border-gray-800 rounded-lg overflow-hidden">
-      <button
-        type="button"
-        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-800/30 transition-colors"
-        onClick={() => setOpen(!open)}
-      >
-        <span className="text-sm font-mono font-medium text-gray-200">v{version.version}</span>
-        <span className={statusCls}>{version.status}</span>
-        {version.auth_type && (
-          <span className="flex items-center gap-1 text-xs text-gray-500 ml-1">
-            <Shield className="h-3 w-3" />
-            {version.auth_type}
-          </span>
-        )}
-        {version.base_url && (
-          <code className="ml-auto text-xs text-indigo-400 truncate max-w-[180px]">
-            {version.base_url}
-          </code>
-        )}
-        <ChevronDown
-          className={clsx(
-            "h-3.5 w-3.5 text-gray-600 shrink-0 transition-transform",
-            open && "rotate-180"
-          )}
-        />
-      </button>
-      {open && version.endpoints.length > 0 && (
-        <div className="border-t border-gray-800 bg-gray-900/40 px-4 py-3">
-          <p className="text-xs font-medium text-gray-500 mb-2">
-            Endpoints ({version.endpoints.length})
-          </p>
-          <div className="space-y-1.5">
-            {version.endpoints.map((ep, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: endpoints lack stable id
-              <div key={i} className="flex items-center gap-2 text-xs">
-                <span
-                  className={clsx(
-                    "inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase shrink-0",
-                    methodBadgeCls(ep.method)
-                  )}
-                >
-                  {ep.method}
-                </span>
-                <code className="font-mono text-gray-300">{ep.path}</code>
-                {ep.description && <span className="text-gray-500 truncate">{ep.description}</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {open && version.endpoints.length === 0 && (
-        <div className="border-t border-gray-800 bg-gray-900/40 px-4 py-3">
-          <p className="text-xs text-gray-600">No endpoints defined for this version.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AdapterModal({
-  adapter,
-  onClose,
-}: {
-  adapter: Adapter;
-  onClose: () => void;
-}) {
-  const categoryColor = categoryColors[adapter.category] ?? "text-gray-400 bg-gray-500/10";
-
-  return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: modal overlay, keyboard handled via close button
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative z-10 w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl border border-gray-800 bg-gray-950 shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center gap-3 border-b border-gray-800 px-6 py-4">
-          <div className={clsx("rounded-lg p-2", categoryColor)}>
-            <Plug className="h-4 w-4" />
-          </div>
-          <div className="flex-1">
-            <h2 className="font-semibold text-white">{adapter.name}</h2>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span
-                className={clsx(
-                  "inline-block rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-                  categoryColor
-                )}
-              >
-                {adapter.category.replaceAll("_", " ")}
-              </span>
-              <span className={adapter.is_active ? "badge-green" : "badge-gray"}>
-                {adapter.is_active ? "Active" : "Inactive"}
-              </span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-300 transition-colors"
-            aria-label="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-auto p-6 space-y-5">
-          {adapter.description && (
-            <p className="text-sm text-gray-400 leading-relaxed">{adapter.description}</p>
-          )}
-
-          <div>
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-              <Link2 className="h-3.5 w-3.5" />
-              Versions ({adapter.versions.length})
-            </h3>
-            {adapter.versions.length > 0 ? (
-              <div className="space-y-2">
-                {adapter.versions.map((v) => (
-                  <VersionPanel key={v.id} version={v} />
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-600">No versions available.</p>
-            )}
-          </div>
-
-          <div className="text-xs text-gray-600 border-t border-gray-800 pt-3">
-            Added {formatTimeAgo(adapter.created_at)}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ── Constants ──────────────────────────────────────────────────────────────
 
 const CATEGORY_PILLS = [
   { value: "", label: "All" },
@@ -212,69 +15,765 @@ const CATEGORY_PILLS = [
   { value: "fraud", label: "Fraud" },
   { value: "notification", label: "Notification" },
   { value: "open_banking", label: "Open Banking" },
-];
+] as const;
+
+type CategoryBadge =
+  | "badge-blue"
+  | "badge-teal"
+  | "badge-yellow"
+  | "badge-green"
+  | "badge-red"
+  | "badge-gray";
+
+const CATEGORY_BADGE: Record<string, CategoryBadge> = {
+  bureau: "badge-blue",
+  kyc: "badge-teal",
+  gst: "badge-yellow",
+  payment: "badge-green",
+  fraud: "badge-red",
+  notification: "badge-gray",
+  open_banking: "badge-blue",
+};
+
+const METHOD_STYLE: Record<string, { bg: string; color: string }> = {
+  GET: { bg: "rgba(15,184,154,0.12)", color: "#2dd4bf" },
+  POST: { bg: "rgba(29,111,164,0.15)", color: "#60a5fa" },
+  PUT: { bg: "rgba(217,119,6,0.12)", color: "#fbbf24" },
+  PATCH: { bg: "rgba(217,119,6,0.12)", color: "#fbbf24" },
+  DELETE: { bg: "rgba(220,38,38,0.12)", color: "#f87171" },
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function categoryBadge(category: string): CategoryBadge {
+  return CATEGORY_BADGE[category] ?? "badge-gray";
+}
+
+function totalEndpoints(adapter: Adapter): number {
+  return adapter.versions.reduce((acc, v) => acc + v.endpoints.length, 0);
+}
+
+function latestVersion(adapter: Adapter): string | undefined {
+  return adapter.versions[adapter.versions.length - 1]?.version;
+}
+
+// ── Skeleton ───────────────────────────────────────────────────────────────
+
+function SkeletonCard() {
+  return (
+    <div className="card animate-pulse" style={{ padding: "1.25rem" }} aria-hidden="true">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          marginBottom: "0.75rem",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <div
+            style={{
+              width: "2.25rem",
+              height: "2.25rem",
+              borderRadius: "0.5rem",
+              background: "var(--color-bg-raised)",
+            }}
+          />
+          <div>
+            <div
+              style={{
+                width: "7rem",
+                height: "0.875rem",
+                borderRadius: "0.25rem",
+                background: "var(--color-bg-raised)",
+                marginBottom: "0.4rem",
+              }}
+            />
+            <div
+              style={{
+                width: "4rem",
+                height: "0.625rem",
+                borderRadius: "0.25rem",
+                background: "var(--color-bg-raised)",
+              }}
+            />
+          </div>
+        </div>
+        <div
+          style={{
+            width: "3.5rem",
+            height: "1.25rem",
+            borderRadius: "9999px",
+            background: "var(--color-bg-raised)",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          marginBottom: "0.25rem",
+          height: "0.75rem",
+          borderRadius: "0.25rem",
+          background: "var(--color-bg-raised)",
+        }}
+      />
+      <div
+        style={{
+          width: "75%",
+          height: "0.75rem",
+          borderRadius: "0.25rem",
+          background: "var(--color-bg-raised)",
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginTop: "1rem",
+          paddingTop: "0.75rem",
+          borderTop: "1px solid var(--color-border)",
+        }}
+      >
+        <div
+          style={{
+            width: "5rem",
+            height: "0.625rem",
+            borderRadius: "0.25rem",
+            background: "var(--color-bg-raised)",
+          }}
+        />
+        <div
+          style={{
+            width: "2.5rem",
+            height: "0.625rem",
+            borderRadius: "0.25rem",
+            background: "var(--color-bg-raised)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Version panel ──────────────────────────────────────────────────────────
+
+function VersionPanel({ version }: { version: AdapterVersion }) {
+  const [open, setOpen] = useState(false);
+  const statusCls = version.status === "active" ? "badge-green" : "badge-gray";
+
+  return (
+    <div
+      style={{
+        border: "1px solid var(--color-border)",
+        borderRadius: "0.5rem",
+        overflow: "hidden",
+      }}
+    >
+      <button
+        type="button"
+        style={{
+          display: "flex",
+          width: "100%",
+          alignItems: "center",
+          gap: "0.625rem",
+          padding: "0.625rem 1rem",
+          textAlign: "left",
+          background: "transparent",
+          cursor: "pointer",
+          transition: "background-color 120ms ease",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--color-bg-raised)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
+        }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span
+          className="mono"
+          style={{ fontWeight: 600, fontSize: "0.8125rem", color: "var(--color-text-primary)" }}
+        >
+          v{version.version}
+        </span>
+        <span className={statusCls}>{version.status}</span>
+        {version.auth_type && (
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.25rem",
+              fontSize: "0.6875rem",
+              color: "var(--color-text-muted)",
+              marginLeft: "0.25rem",
+            }}
+          >
+            <Shield size={11} />
+            {version.auth_type}
+          </span>
+        )}
+        {version.base_url && (
+          <code
+            className="mono"
+            style={{
+              marginLeft: "auto",
+              fontSize: "0.6875rem",
+              color: "var(--color-brand-light)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: "11rem",
+            }}
+          >
+            {version.base_url}
+          </code>
+        )}
+        <ChevronDown
+          size={13}
+          style={{
+            color: "var(--color-text-muted)",
+            flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 150ms ease",
+          }}
+        />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            borderTop: "1px solid var(--color-border)",
+            background: "rgba(15,23,36,0.6)",
+            padding: "0.75rem 1rem",
+          }}
+        >
+          {version.endpoints.length === 0 ? (
+            <p style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+              No endpoints defined.
+            </p>
+          ) : (
+            <>
+              <p className="section-label" style={{ marginBottom: "0.5rem" }}>
+                Endpoints ({version.endpoints.length})
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                {version.endpoints.map((ep) => {
+                  const ms = METHOD_STYLE[ep.method] ?? {
+                    bg: "rgba(71,85,105,0.15)",
+                    color: "#94a3b8",
+                  };
+                  return (
+                    <div
+                      key={`${ep.method}:${ep.path}`}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        fontSize: "0.75rem",
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "0.125rem 0.375rem",
+                          borderRadius: "0.25rem",
+                          background: ms.bg,
+                          color: ms.color,
+                          fontWeight: 700,
+                          fontSize: "0.625rem",
+                          letterSpacing: "0.05em",
+                          textTransform: "uppercase",
+                          flexShrink: 0,
+                          minWidth: "3rem",
+                          textAlign: "center",
+                        }}
+                      >
+                        {ep.method}
+                      </span>
+                      <code
+                        className="mono"
+                        style={{ color: "var(--color-text-secondary)", fontSize: "0.75rem" }}
+                      >
+                        {ep.path}
+                      </code>
+                      {ep.description && (
+                        <span
+                          style={{
+                            color: "var(--color-text-muted)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {ep.description}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Adapter detail modal ───────────────────────────────────────────────────
+
+function AdapterModal({ adapter, onClose }: { adapter: Adapter; onClose: () => void }) {
+  const badge = categoryBadge(adapter.category);
+  const epCount = totalEndpoints(adapter);
+
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: modal overlay, keyboard handled via close button
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1rem",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(0,0,0,0.65)",
+          backdropFilter: "blur(4px)",
+        }}
+      />
+      <div
+        className="animate-fade-in"
+        style={{
+          position: "relative",
+          zIndex: 10,
+          width: "100%",
+          maxWidth: "42rem",
+          maxHeight: "88vh",
+          display: "flex",
+          flexDirection: "column",
+          borderRadius: "0.75rem",
+          border: "1px solid var(--color-border-strong)",
+          background: "var(--color-bg-elevated)",
+          boxShadow: "0 24px 48px rgba(0,0,0,0.5)",
+        }}
+      >
+        {/* Modal header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.875rem",
+            padding: "1.25rem 1.5rem",
+            borderBottom: "1px solid var(--color-border)",
+          }}
+        >
+          <div
+            style={{
+              padding: "0.5rem",
+              borderRadius: "0.5rem",
+              background: "var(--color-brand-subtle)",
+              color: "var(--color-brand-light)",
+              flexShrink: 0,
+            }}
+          >
+            <Plug size={18} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2
+              style={{
+                fontSize: "0.9375rem",
+                fontWeight: 600,
+                color: "var(--color-text-primary)",
+                margin: 0,
+              }}
+            >
+              {adapter.name}
+            </h2>
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem" }}
+            >
+              <span className={badge}>{adapter.category.replaceAll("_", " ")}</span>
+              <span
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.3rem",
+                  fontSize: "0.6875rem",
+                  color: adapter.is_active ? "#34d399" : "var(--color-text-muted)",
+                }}
+              >
+                <span
+                  style={{
+                    width: "5px",
+                    height: "5px",
+                    borderRadius: "50%",
+                    background: adapter.is_active ? "#34d399" : "#475569",
+                    display: "inline-block",
+                  }}
+                />
+                {adapter.is_active ? "Active" : "Inactive"}
+              </span>
+            </div>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "1.25rem",
+              fontSize: "0.6875rem",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+              <GitBranch size={11} />
+              {adapter.versions.length} version{adapter.versions.length !== 1 ? "s" : ""}
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+              <Zap size={11} />
+              {epCount} endpoint{epCount !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              color: "var(--color-text-muted)",
+              cursor: "pointer",
+              background: "transparent",
+              border: "none",
+              lineHeight: 0,
+              padding: "0.25rem",
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Modal body */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "1.5rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.25rem",
+          }}
+        >
+          {adapter.description && (
+            <p
+              style={{
+                fontSize: "0.8125rem",
+                color: "var(--color-text-secondary)",
+                lineHeight: "1.6",
+                margin: 0,
+              }}
+            >
+              {adapter.description}
+            </p>
+          )}
+
+          <div>
+            <p className="section-label" style={{ marginBottom: "0.625rem" }}>
+              Versions
+            </p>
+            {adapter.versions.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                {adapter.versions.map((v) => (
+                  <VersionPanel key={v.id} version={v} />
+                ))}
+              </div>
+            ) : (
+              <p style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)" }}>
+                No versions available.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Adapter card ───────────────────────────────────────────────────────────
+
+function AdapterCard({ adapter, onClick }: { adapter: Adapter; onClick: () => void }) {
+  const badge = categoryBadge(adapter.category);
+  const epCount = totalEndpoints(adapter);
+  const ver = latestVersion(adapter);
+
+  return (
+    <button
+      type="button"
+      className="card-hover"
+      onClick={onClick}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: "1.25rem",
+        cursor: "pointer",
+      }}
+    >
+      {/* Top row */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          marginBottom: "0.75rem",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}>
+          <div
+            style={{
+              padding: "0.5rem",
+              borderRadius: "0.5rem",
+              background: "var(--color-brand-subtle)",
+              color: "var(--color-brand-light)",
+              flexShrink: 0,
+            }}
+          >
+            <Plug size={16} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <p
+              style={{
+                fontSize: "0.9375rem",
+                fontWeight: 600,
+                color: "var(--color-text-primary)",
+                margin: 0,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {adapter.name}
+            </p>
+            <span className={badge} style={{ marginTop: "0.25rem" }}>
+              {adapter.category.replaceAll("_", " ")}
+            </span>
+          </div>
+        </div>
+        {/* Status dot + label */}
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.3rem",
+            fontSize: "0.6875rem",
+            fontWeight: 500,
+            color: adapter.is_active ? "#34d399" : "var(--color-text-muted)",
+            flexShrink: 0,
+            marginLeft: "0.5rem",
+          }}
+        >
+          <span
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: adapter.is_active ? "#34d399" : "#475569",
+              display: "inline-block",
+            }}
+          />
+          {adapter.is_active ? "Active" : "Inactive"}
+        </span>
+      </div>
+
+      {/* Description */}
+      <p
+        style={{
+          fontSize: "0.8125rem",
+          color: "var(--color-text-secondary)",
+          lineHeight: "1.5",
+          margin: 0,
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+        }}
+      >
+        {adapter.description ?? "No description provided."}
+      </p>
+
+      {/* Footer */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginTop: "1rem",
+          paddingTop: "0.75rem",
+          borderTop: "1px solid var(--color-border)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.875rem" }}>
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.3rem",
+              fontSize: "0.6875rem",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            <GitBranch size={11} />
+            {adapter.versions.length} ver.
+          </span>
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.3rem",
+              fontSize: "0.6875rem",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            <Globe size={11} />
+            {epCount} ep.
+          </span>
+        </div>
+        {ver && (
+          <span
+            className="mono"
+            style={{ fontSize: "0.6875rem", color: "var(--color-text-muted)" }}
+          >
+            v{ver}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────
 
 export default function Adapters() {
   const [categoryFilter, setCategoryFilter] = useState("");
-  const { data, isLoading, error, refetch } = useQuery({
+  const [selected, setSelected] = useState<Adapter | null>(null);
+
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["adapters", categoryFilter],
     queryFn: () => adaptersApi.list(categoryFilter || undefined),
   });
-  const [selectedAdapter, setSelectedAdapter] = useState<Adapter | null>(null);
 
-  const adapters: Adapter[] = isLoading ? [] : (data?.data?.adapters ?? []);
+  const adapters: Adapter[] = data?.data?.adapters ?? [];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+      {/* Page header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
-          <h1 className="text-2xl font-bold text-white">Adapters</h1>
-          <p className="mt-1 text-sm text-gray-400">Integration connectors and data sources</p>
+          <h1
+            style={{
+              fontSize: "1.5rem",
+              fontWeight: 700,
+              color: "var(--color-text-primary)",
+              margin: 0,
+            }}
+          >
+            Adapters
+          </h1>
+          <p
+            style={{
+              marginTop: "0.25rem",
+              fontSize: "0.8125rem",
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            Integration connectors and data sources
+          </p>
         </div>
         <button
           type="button"
           className="btn-secondary"
           onClick={() => refetch()}
-          aria-label="Refresh adapters list"
+          aria-label="Refresh adapters"
         >
-          <RefreshCw className={clsx("h-4 w-4", isLoading && "animate-spin")} />
+          <RefreshCw
+            size={14}
+            style={{ animation: isFetching ? "spin 1s linear infinite" : undefined }}
+          />
           Refresh
         </button>
       </div>
 
-      {/* Category filter pills */}
-      <fieldset className="flex flex-wrap gap-2">
+      {/* Category filter bar */}
+      <fieldset
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "0.5rem",
+          border: "none",
+          padding: 0,
+          margin: 0,
+        }}
+      >
         <legend className="sr-only">Filter by category</legend>
-        {CATEGORY_PILLS.map((pill) => (
-          <button
-            key={pill.value}
-            type="button"
-            onClick={() => setCategoryFilter(pill.value)}
-            className={clsx(
-              "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-              categoryFilter === pill.value
-                ? "bg-indigo-600 text-white"
-                : "border border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-200"
-            )}
-          >
-            {pill.label}
-          </button>
-        ))}
+        {CATEGORY_PILLS.map((pill) => {
+          const active = categoryFilter === pill.value;
+          return (
+            <button
+              key={pill.value}
+              type="button"
+              onClick={() => setCategoryFilter(pill.value)}
+              style={{
+                padding: "0.375rem 0.875rem",
+                borderRadius: "9999px",
+                fontSize: "0.75rem",
+                fontWeight: 500,
+                cursor: "pointer",
+                transition:
+                  "background-color 120ms ease, color 120ms ease, border-color 120ms ease",
+                background: active ? "var(--color-brand)" : "transparent",
+                color: active ? "#fff" : "var(--color-text-secondary)",
+                border: active
+                  ? "1px solid var(--color-brand)"
+                  : "1px solid var(--color-border-strong)",
+              }}
+            >
+              {pill.label}
+            </button>
+          );
+        })}
       </fieldset>
 
+      {/* Error banner */}
       {error && (
         <div
           role="alert"
-          className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-400"
+          style={{
+            padding: "0.875rem 1rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(220,38,38,0.25)",
+            background: "rgba(220,38,38,0.06)",
+            fontSize: "0.8125rem",
+            color: "var(--color-error-text)",
+          }}
         >
           Failed to load adapters. Please try refreshing.
         </div>
       )}
 
+      {/* Grid */}
       {isLoading ? (
         <div
-          className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
           aria-label="Loading adapters"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(17rem, 1fr))",
+            gap: "1rem",
+          }}
         >
           {Array.from({ length: 6 }).map((_, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders
@@ -282,72 +781,68 @@ export default function Adapters() {
           ))}
         </div>
       ) : adapters.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-gray-800 bg-gray-900/40 py-16 text-center">
-          <div className="rounded-full bg-gray-800 p-4">
-            <Plug className="h-6 w-6 text-gray-500" />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "4rem 1rem",
+            borderRadius: "0.75rem",
+            border: "1px solid var(--color-border)",
+            background: "var(--color-bg-elevated)",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              padding: "1rem",
+              borderRadius: "9999px",
+              background: "var(--color-bg-raised)",
+              marginBottom: "1rem",
+            }}
+          >
+            <Plug size={24} style={{ color: "var(--color-text-muted)" }} />
           </div>
-          <h2 className="mt-4 text-base font-semibold text-gray-300">No adapters configured</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Connect your first data source to get started.
+          <p
+            style={{
+              fontSize: "0.9375rem",
+              fontWeight: 600,
+              color: "var(--color-text-secondary)",
+              margin: 0,
+            }}
+          >
+            No adapters found
+          </p>
+          <p
+            style={{
+              marginTop: "0.25rem",
+              fontSize: "0.8125rem",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            {categoryFilter
+              ? "Try a different category filter."
+              : "Connect your first data source to get started."}
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {adapters.map((adapter) => {
-            const statusLabel = adapter.is_active ? "Active" : "Inactive";
-            const statusCls = adapter.is_active ? "badge-green" : "badge-gray";
-            const categoryColor =
-              categoryColors[adapter.category] ?? "text-gray-400 bg-gray-500/10";
-            const latestVersion = adapter.versions[adapter.versions.length - 1]?.version;
-
-            return (
-              <button
-                key={adapter.id}
-                type="button"
-                className="card-hover group p-5 text-left w-full cursor-pointer"
-                onClick={() => setSelectedAdapter(adapter)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={clsx("rounded-lg p-2", categoryColor)}>
-                      <Plug className="h-4 w-4" aria-hidden="true" />
-                    </div>
-                    <div>
-                      <h2 className="font-semibold text-white group-hover:text-indigo-300 transition-colors">
-                        {adapter.name}
-                      </h2>
-                      <span
-                        className={clsx(
-                          "mt-0.5 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-                          categoryColor
-                        )}
-                      >
-                        {adapter.category.replaceAll("_", " ")}
-                      </span>
-                    </div>
-                  </div>
-                  <span className={statusCls}>{statusLabel}</span>
-                </div>
-                <p className="mt-3 text-sm leading-relaxed text-gray-400">{adapter.description}</p>
-                <div className="mt-4 flex items-center justify-between border-t border-gray-800 pt-3">
-                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                    <Clock className="h-3 w-3" aria-hidden="true" />
-                    <span>
-                      <span className="sr-only">Added: </span>
-                      {formatTimeAgo(adapter.created_at)}
-                    </span>
-                  </div>
-                  {latestVersion && <span className="text-xs text-gray-500">v{latestVersion}</span>}
-                </div>
-              </button>
-            );
-          })}
+        <div
+          className="animate-fade-in"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(17rem, 1fr))",
+            gap: "1rem",
+          }}
+        >
+          {adapters.map((adapter) => (
+            <AdapterCard key={adapter.id} adapter={adapter} onClick={() => setSelected(adapter)} />
+          ))}
         </div>
       )}
 
-      {selectedAdapter && (
-        <AdapterModal adapter={selectedAdapter} onClose={() => setSelectedAdapter(null)} />
-      )}
+      {/* Detail modal */}
+      {selected && <AdapterModal adapter={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }

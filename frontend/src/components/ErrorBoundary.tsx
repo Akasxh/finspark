@@ -27,18 +27,26 @@ export default class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex h-screen items-center justify-center bg-gray-950">
+        <div
+          className="flex h-screen items-center justify-center"
+          style={{ backgroundColor: "var(--color-bg-base)" }}
+        >
           <div className="max-w-md text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10">
-              <AlertTriangle className="h-8 w-8 text-red-400" />
+            <div
+              className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
+              style={{ backgroundColor: "rgba(220, 38, 38, 0.1)" }}
+            >
+              <AlertTriangle className="h-8 w-8" style={{ color: "var(--color-error-text)" }} />
             </div>
-            <h1 className="text-xl font-bold text-white">Something went wrong</h1>
-            <p className="mt-2 text-sm text-gray-400">
+            <h1 className="text-xl font-bold" style={{ color: "var(--color-text-primary)" }}>
+              Something went wrong
+            </h1>
+            <p className="mt-2 text-[13px]" style={{ color: "var(--color-text-secondary)" }}>
               {this.state.error?.message ?? "An unexpected error occurred."}
             </p>
             <button
               type="button"
-              className="mt-6 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+              className="btn-primary mt-6"
               onClick={() => {
                 this.setState({ hasError: false, error: null });
                 window.location.reload();

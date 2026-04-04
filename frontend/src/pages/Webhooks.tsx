@@ -4,356 +4,274 @@ import { Plus, Trash2, Webhook, Zap } from "lucide-react";
 import { useState } from "react";
 
 const ALL_EVENTS = [
-  "adapter.created",
-  "adapter.updated",
-  "configuration.generated",
-  "configuration.validated",
-  "simulation.completed",
-  "simulation.failed",
-  "document.uploaded",
-  "document.processed",
-];
+  "config.created", "config.updated", "config.deployed", "simulation.passed",
+  "simulation.failed", "document.uploaded", "document.parsed", "webhook.test",
+] as const;
 
-interface WebhookEntry {
-  id: string;
-  url: string;
-  events: string[];
-  active: boolean;
-  created_at: string;
+type EventType = (typeof ALL_EVENTS)[number];
+
+interface WebhookEntry { id: string; tenant_id: string; url: string; events: string[]; is_active: boolean; created_at: string; }
+interface TestResult { id: string; webhook_id: string; event_type: string; status: string; response_code: number | null; attempts: number; created_at: string; }
+
+const C = {
+  base: "var(--color-bg-base)", elevated: "var(--color-bg-elevated)", raised: "var(--color-bg-raised)",
+  border: "var(--color-border)", borderStrong: "var(--color-border-strong)",
+  brand: "var(--color-brand)", brandLight: "var(--color-brand-light)",
+  teal: "var(--color-teal)", primary: "var(--color-text-primary)",
+  secondary: "var(--color-text-secondary)", muted: "var(--color-text-muted)",
+  error: "var(--color-error-text)",
+} as const;
+
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-interface TestResult {
-  success: boolean;
-  status_code?: number;
-  error?: string;
-}
+function trunc(url: string, n = 42) { return url.length > n ? `${url.slice(0, n)}…` : url; }
 
-interface WebhookRowProps {
-  wh: WebhookEntry;
-  isLast: boolean;
-  testResult?: TestResult;
-  testPending: boolean;
-  deleteConfirm: string | null;
-  deletePending: boolean;
-  onTest: (id: string) => void;
-  onDeleteRequest: (id: string) => void;
-  onDeleteConfirm: (id: string) => void;
-  onDeleteCancel: () => void;
-}
+// ── Add form ──────────────────────────────────────────────────────────────────
 
-function WebhookRow({
-  wh,
-  isLast,
-  testResult,
-  testPending,
-  deleteConfirm,
-  deletePending,
-  onTest,
-  onDeleteRequest,
-  onDeleteConfirm,
-  onDeleteCancel,
-}: WebhookRowProps) {
-  return (
-    <li className={`px-6 py-4 hover:bg-gray-800/20 ${isLast ? "" : "border-b border-gray-800/40"}`}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-white truncate">{wh.url}</span>
-            <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                wh.active ? "bg-emerald-500/10 text-emerald-400" : "bg-gray-700 text-gray-400"
-              }`}
-            >
-              {wh.active ? "Active" : "Inactive"}
-            </span>
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {wh.events.map((ev) => (
-              <span key={ev} className="rounded bg-gray-800 px-1.5 py-0.5 text-xs text-gray-400">
-                {ev}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2">
-          {testResult && (
-            <span className={`text-xs ${testResult.success ? "text-emerald-400" : "text-red-400"}`}>
-              {testResult.success
-                ? `OK ${testResult.status_code ?? ""}`
-                : (testResult.error ?? "Failed")}
-            </span>
-          )}
-
-          <button
-            type="button"
-            onClick={() => onTest(wh.id)}
-            disabled={testPending}
-            title="Send test event"
-            className="flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 disabled:opacity-50 transition-colors"
-          >
-            <Zap className="h-3 w-3" />
-            Test
-          </button>
-
-          {deleteConfirm === wh.id ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => onDeleteConfirm(wh.id)}
-                disabled={deletePending}
-                className="rounded-lg bg-red-600/80 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
-              >
-                Confirm
-              </button>
-              <button
-                type="button"
-                onClick={onDeleteCancel}
-                className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onDeleteRequest(wh.id)}
-              title="Delete webhook"
-              className="flex items-center justify-center rounded-lg border border-gray-700 p-1.5 text-gray-400 hover:border-red-500/50 hover:text-red-400 transition-colors"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-    </li>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="rounded-full bg-gray-800 p-4">
-        <Webhook className="h-6 w-6 text-gray-500" aria-hidden="true" />
-      </div>
-      <h2 className="mt-4 text-base font-semibold text-gray-300">No webhooks registered</h2>
-      <p className="mt-1 text-sm text-gray-500">Add a webhook below to start receiving events.</p>
-    </div>
-  );
-}
-
-export default function Webhooks() {
-  const queryClient = useQueryClient();
-
-  const [showForm, setShowForm] = useState(false);
+function AddForm({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
   const [url, setUrl] = useState("");
   const [secret, setSecret] = useState("");
-  const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+  const [events, setEvents] = useState<EventType[]>([]);
+  const toggle = (e: EventType) => setEvents((p) => p.includes(e) ? p.filter((x) => x !== e) : [...p, e]);
+
+  const mut = useMutation({
+    mutationFn: (p: { url: string; events: string[]; secret?: string }) => webhooksApi.create(p),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["webhooks"] }); onClose(); },
+  });
+
+  const inputStyle = {
+    width: "100%", background: C.base, border: `1px solid ${C.borderStrong}`,
+    borderRadius: 6, padding: "8px 12px", color: C.primary, outline: "none", boxSizing: "border-box" as const,
+  };
+
+  return (
+    <form
+      onSubmit={(e) => { e.preventDefault(); if (url && events.length) mut.mutate({ url, events, secret: secret || undefined }); }}
+      className="card animate-fade-in"
+      style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}
+    >
+      <h2 style={{ fontSize: 15, fontWeight: 600, color: C.primary, margin: 0 }}>New Webhook</h2>
+
+      <div>
+        <label htmlFor="wh-url" className="section-label" style={{ padding: 0, display: "block", marginBottom: 4 }}>
+          Endpoint URL <span style={{ color: C.error }}>*</span>
+        </label>
+        <input id="wh-url" type="url" required placeholder="https://example.com/webhook"
+          value={url} onChange={(e) => setUrl(e.target.value)} className="mono" style={inputStyle} />
+      </div>
+
+      <div>
+        <label htmlFor="wh-secret" className="section-label" style={{ padding: 0, display: "block", marginBottom: 4 }}>
+          Signing Secret <span style={{ color: C.muted }}>(optional)</span>
+        </label>
+        <input id="wh-secret" type="password" placeholder="Signing secret"
+          value={secret} onChange={(e) => setSecret(e.target.value)} style={inputStyle} />
+      </div>
+
+      <div>
+        <p className="section-label" style={{ padding: 0, marginBottom: 8 }}>
+          Events <span style={{ color: C.error }}>*</span>
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+          {ALL_EVENTS.map((ev) => {
+            const on = events.includes(ev);
+            return (
+              <button key={ev} type="button" onClick={() => toggle(ev)} style={{
+                padding: "4px 10px", borderRadius: 9999, fontSize: 11, fontWeight: 600,
+                letterSpacing: "0.04em", cursor: "pointer", transition: "all 120ms ease",
+                border: on ? `1px solid rgba(29,111,164,0.6)` : `1px solid ${C.border}`,
+                background: on ? "rgba(29,111,164,0.18)" : "transparent",
+                color: on ? C.brandLight : C.secondary,
+              }}>{ev}</button>
+            );
+          })}
+        </div>
+      </div>
+
+      {mut.isError && <p style={{ fontSize: 13, color: C.error, margin: 0 }}>Failed to create — check URL and retry.</p>}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button type="submit" className="btn-primary" disabled={mut.isPending || !url || !events.length}>
+          {mut.isPending ? "Creating…" : "Create Webhook"}
+        </button>
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+// ── Webhook row ───────────────────────────────────────────────────────────────
+
+interface RowProps {
+  wh: WebhookEntry; isLast: boolean; testResult: TestResult | null;
+  testPending: boolean; deleteConfirm: boolean; deletePending: boolean;
+  onTest(): void; onDeleteRequest(): void; onDeleteConfirm(): void; onDeleteCancel(): void;
+}
+
+function WebhookRow({ wh, isLast, testResult, testPending, deleteConfirm, deletePending, onTest, onDeleteRequest, onDeleteConfirm, onDeleteCancel }: RowProps) {
+  const visible = wh.events.slice(0, 3);
+  const overflow = wh.events.length - 3;
+  const testOk = testResult !== null && testResult.response_code !== null && testResult.response_code >= 200 && testResult.response_code < 300;
+
+  return (
+    <tr className="table-row" style={{ borderBottom: isLast ? "none" : undefined }}>
+      <td style={{ padding: "0 16px", maxWidth: 320 }}>
+        <span className="mono" style={{ color: C.primary, fontSize: 13 }} title={wh.url}>{trunc(wh.url)}</span>
+      </td>
+      <td style={{ padding: "0 16px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {visible.map((ev) => <span key={ev} className="badge-blue">{ev}</span>)}
+          {overflow > 0 && <span className="badge-gray">+{overflow} more</span>}
+        </div>
+      </td>
+      <td style={{ padding: "0 16px" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: wh.is_active ? C.teal : C.muted }} />
+          <span style={{ fontSize: 12, fontWeight: 500, color: wh.is_active ? C.teal : C.muted }}>{wh.is_active ? "Active" : "Inactive"}</span>
+        </span>
+      </td>
+      <td style={{ padding: "0 16px", color: C.secondary, fontSize: 13 }}>{fmtDate(wh.created_at)}</td>
+      <td style={{ padding: "0 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {testResult !== null && (
+            <span className="animate-fade-in" style={{ fontSize: 11, fontWeight: 600, color: testOk ? C.teal : C.error }}>
+              {testOk ? `${testResult.response_code ?? ""} OK` : testResult.response_code ? `${testResult.response_code} Err` : "Failed"}
+            </span>
+          )}
+          {deleteConfirm ? (
+            <>
+              <button type="button" onClick={onDeleteConfirm} disabled={deletePending} style={{
+                fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 6,
+                border: "1px solid rgba(220,38,38,0.4)", background: "rgba(220,38,38,0.12)",
+                color: C.error, cursor: deletePending ? "not-allowed" : "pointer", opacity: deletePending ? 0.5 : 1,
+              }}>Confirm</button>
+              <button type="button" className="btn-secondary" onClick={onDeleteCancel} style={{ padding: "4px 10px", fontSize: 12 }}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={onTest} disabled={testPending} className="btn-secondary" style={{ padding: "4px 10px", fontSize: 12, gap: 4 }}>
+                <Zap style={{ width: 12, height: 12 }} />{testPending ? "Testing…" : "Test"}
+              </button>
+              <button type="button" onClick={onDeleteRequest} className="btn-danger" style={{ padding: "4px 8px" }} title="Delete webhook">
+                <Trash2 style={{ width: 13, height: 13 }} />
+              </button>
+            </>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function Webhooks() {
+  const qc = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["webhooks"],
-    queryFn: () => webhooksApi.list(),
-  });
+  const { data, isLoading, error } = useQuery({ queryKey: ["webhooks"], queryFn: () => webhooksApi.list() });
+  const rawData = data as { data?: WebhookEntry[] } | WebhookEntry[] | null | undefined;
+  const webhooks: WebhookEntry[] = (Array.isArray(rawData) ? rawData : rawData?.data) ?? [];
 
-  const webhooks: WebhookEntry[] = data?.data ?? data ?? [];
-
-  const createMutation = useMutation({
-    mutationFn: (payload: { url: string; events: string[]; secret?: string }) =>
-      webhooksApi.create(payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["webhooks"] });
-      setShowForm(false);
-      setUrl("");
-      setSecret("");
-      setSelectedEvents([]);
-    },
-  });
-
-  const deleteMutation = useMutation({
+  const deleteMut = useMutation({
     mutationFn: (id: string) => webhooksApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["webhooks"] });
-      setDeleteConfirm(null);
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["webhooks"] }); setDeleteConfirm(null); },
   });
 
-  const testMutation = useMutation({
+  const testMut = useMutation({
     mutationFn: (id: string) => webhooksApi.test(id),
-    onSuccess: (result, id) => {
-      setTestResults((prev) => ({ ...prev, [id]: result?.data ?? result }));
-    },
-    onError: (_err, id) => {
-      setTestResults((prev) => ({ ...prev, [id]: { success: false, error: "Request failed" } }));
-    },
+    onSuccess: (res, id) => setTestResults((p) => ({ ...p, [id]: ((res as { data?: TestResult })?.data ?? res) as TestResult })),
+    onError: (_e, id) => setTestResults((p) => ({
+      ...p, [id]: { id: "", webhook_id: id, event_type: "webhook.test", status: "failed", response_code: null, attempts: 1, created_at: new Date().toISOString() },
+    })),
   });
-
-  function toggleEvent(event: string) {
-    setSelectedEvents((prev) =>
-      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]
-    );
-  }
-
-  function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!url || selectedEvents.length === 0) return;
-    createMutation.mutate({ url, events: selectedEvents, secret: secret || undefined });
-  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <h1 className="text-2xl font-bold text-white">Webhooks</h1>
-          <p className="mt-1 text-sm text-gray-400">
-            Manage event notifications to external endpoints
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: C.primary, margin: 0 }}>Webhooks</h1>
+          <p style={{ fontSize: 13, color: C.secondary, margin: "4px 0 0" }}>
+            Deliver real-time event notifications to external endpoints
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowForm((v) => !v)}
-          className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          Add Webhook
+        <button type="button" className="btn-primary" onClick={() => setShowForm((v) => !v)}>
+          <Plus style={{ width: 14, height: 14 }} />{showForm ? "Cancel" : "Add Webhook"}
         </button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="card p-6 space-y-4">
-          <h2 className="font-semibold text-white">New Webhook</h2>
-
-          <div>
-            <label htmlFor="webhook-url" className="block text-xs font-medium text-gray-400 mb-1">
-              URL <span className="text-red-400">*</span>
-            </label>
-            <input
-              id="webhook-url"
-              type="url"
-              required
-              placeholder="https://example.com/webhook"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="webhook-secret"
-              className="block text-xs font-medium text-gray-400 mb-1"
-            >
-              Secret (optional)
-            </label>
-            <input
-              id="webhook-secret"
-              type="password"
-              placeholder="Signing secret"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
-
-          <div>
-            <p className="block text-xs font-medium text-gray-400 mb-2">
-              Events <span className="text-red-400">*</span>
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {ALL_EVENTS.map((event) => (
-                <label
-                  key={event}
-                  className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedEvents.includes(event)}
-                    onChange={() => toggleEvent(event)}
-                    className="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-indigo-500"
-                  />
-                  {event}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {createMutation.isError && (
-            <p className="text-sm text-red-400">Failed to create webhook. Please try again.</p>
-          )}
-
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              disabled={createMutation.isPending || !url || selectedEvents.length === 0}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {createMutation.isPending ? "Creating..." : "Create Webhook"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      )}
+      {showForm && <AddForm onClose={() => setShowForm(false)} />}
 
       {error && (
-        <div
-          role="alert"
-          className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-400"
-        >
-          Failed to load webhooks. Please try refreshing.
+        <div role="alert" style={{ borderRadius: 8, border: "1px solid rgba(220,38,38,0.2)", background: "rgba(220,38,38,0.06)", padding: "12px 16px", fontSize: 13, color: C.error }}>
+          Failed to load webhooks — please refresh.
         </div>
       )}
 
-      <div className="card overflow-hidden">
-        <div className="border-b border-gray-800 px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Webhook className="h-4 w-4 text-gray-400" aria-hidden="true" />
-            <h2 className="font-semibold text-white">Registered Webhooks</h2>
-          </div>
+      <div className="card" style={{ overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderBottom: `1px solid ${C.border}` }}>
+          <Webhook style={{ width: 15, height: 15, color: C.muted }} />
+          <span style={{ fontSize: 15, fontWeight: 600, color: C.primary }}>Registered Webhooks</span>
+          {!isLoading && <span className="badge-gray" style={{ marginLeft: 4 }}>{webhooks.length}</span>}
         </div>
 
-        {isLoading ? (
-          <div className="space-y-0" aria-label="Loading webhooks">
-            {(["s1", "s2", "s3"] as const).map((key) => (
-              <div
-                key={key}
-                className="flex items-center gap-4 px-6 py-4 border-b border-gray-800/40 animate-pulse"
-              >
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 w-64 rounded bg-gray-800" />
-                  <div className="h-3 w-40 rounded bg-gray-800" />
-                </div>
-                <div className="h-8 w-16 rounded bg-gray-800" />
-              </div>
-            ))}
-          </div>
-        ) : webhooks.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <ul>
-            {webhooks.map((wh, i) => (
-              <WebhookRow
-                key={wh.id}
-                wh={wh}
-                isLast={i === webhooks.length - 1}
-                testResult={testResults[wh.id]}
-                testPending={testMutation.isPending && testMutation.variables === wh.id}
-                deleteConfirm={deleteConfirm}
-                deletePending={deleteMutation.isPending}
-                onTest={(id) => testMutation.mutate(id)}
-                onDeleteRequest={(id) => setDeleteConfirm(id)}
-                onDeleteConfirm={(id) => deleteMutation.mutate(id)}
-                onDeleteCancel={() => setDeleteConfirm(null)}
-              />
-            ))}
-          </ul>
-        )}
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr className="table-header">
+              <th style={{ textAlign: "left", padding: "0 16px", width: "30%" }}>URL</th>
+              <th style={{ textAlign: "left", padding: "0 16px", width: "28%" }}>Events</th>
+              <th style={{ textAlign: "left", padding: "0 16px", width: "10%" }}>Status</th>
+              <th style={{ textAlign: "left", padding: "0 16px", width: "14%" }}>Created</th>
+              <th style={{ textAlign: "left", padding: "0 16px", width: "18%" }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading
+              ? [0, 1, 2].map((i) => (
+                <tr key={i} style={{ height: 48, borderBottom: `1px solid ${C.border}` }}>
+                  {[300, 180, 60, 80, 110].map((w, ci) => (
+                    <td key={ci} style={{ padding: "0 16px" }}>
+                      <div style={{ height: 12, width: w, borderRadius: 4, background: C.raised }} className="animate-pulse" />
+                    </td>
+                  ))}
+                </tr>
+              ))
+              : webhooks.length === 0
+                ? (
+                  <tr><td colSpan={5}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "56px 24px", gap: 12 }}>
+                      <div style={{ width: 44, height: 44, borderRadius: "50%", background: C.raised, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Webhook style={{ width: 20, height: 20, color: C.muted }} />
+                      </div>
+                      <p style={{ fontSize: 15, fontWeight: 600, color: C.primary, margin: 0 }}>No webhooks configured</p>
+                      <p style={{ fontSize: 13, color: C.secondary, margin: 0 }}>Add a webhook to start receiving real-time events.</p>
+                      <button type="button" className="btn-primary" onClick={() => setShowForm(true)} style={{ marginTop: 4 }}>
+                        <Plus style={{ width: 14, height: 14 }} />Add Webhook
+                      </button>
+                    </div>
+                  </td></tr>
+                )
+                : webhooks.map((wh, i) => (
+                  <WebhookRow
+                    key={wh.id} wh={wh} isLast={i === webhooks.length - 1}
+                    testResult={testResults[wh.id] ?? null}
+                    testPending={testMut.isPending && testMut.variables === wh.id}
+                    deleteConfirm={deleteConfirm === wh.id}
+                    deletePending={deleteMut.isPending && deleteMut.variables === wh.id}
+                    onTest={() => testMut.mutate(wh.id)}
+                    onDeleteRequest={() => setDeleteConfirm(wh.id)}
+                    onDeleteConfirm={() => deleteMut.mutate(wh.id)}
+                    onDeleteCancel={() => setDeleteConfirm(null)}
+                  />
+                ))
+            }
+          </tbody>
+        </table>
       </div>
     </div>
   );

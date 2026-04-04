@@ -1,31 +1,23 @@
 import { configurationsApi, simulationsApi } from "@/lib/api";
 import type { Configuration, Simulation, SimulationStepResult } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import clsx from "clsx";
-import {
-  AlertCircle,
-  BarChart3,
-  CheckCircle2,
-  ChevronDown,
-  Clock,
-  FlaskConical,
-  Loader2,
-  Play,
-  XCircle,
-  Zap,
-} from "lucide-react";
+import { AlertCircle, BarChart3, ChevronDown, FlaskConical, Loader2, Play, Zap } from "lucide-react";
 import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-const statusConfig: Record<
-  string,
-  { label: string; icon: React.ComponentType<{ className?: string }>; cls: string }
-> = {
-  pending: { label: "Pending", icon: Clock, cls: "badge-yellow" },
-  running: { label: "Running", icon: Loader2, cls: "badge-blue" },
-  passed: { label: "Passed", icon: CheckCircle2, cls: "badge-green" },
-  failed: { label: "Failed", icon: XCircle, cls: "badge-red" },
-  error: { label: "Error", icon: XCircle, cls: "badge-red" },
+const C = {
+  base: "#0a0f1a",
+  elevated: "#0f1724",
+  raised: "#18243a",
+  border: "#1e2d47",
+  borderHi: "#2a3f5e",
+  brand: "#1d6fa4",
+  brandHi: "#2d8fce",
+  teal: "#0fb89a",
+  red: "#ef4444",
+  text: "#e2e8f0",
+  muted: "#64748b",
+  mutedHi: "#94a3b8",
 };
 
 function formatDuration(ms?: number): string {
@@ -35,62 +27,165 @@ function formatDuration(ms?: number): string {
   return `${(ms / 60000).toFixed(1)}m`;
 }
 
+function StatusDot({ passed }: { passed: boolean }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        background: passed ? C.teal : C.red,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+function TestTypeBadge({ type }: { type: string }) {
+  const colors: Record<string, string> = {
+    full: C.brand,
+    smoke: "#d97706",
+    integration: "#7c3aed",
+  };
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        color: colors[type] ?? C.muted,
+        background: `${colors[type] ?? C.muted}18`,
+        border: `1px solid ${colors[type] ?? C.muted}40`,
+        borderRadius: 4,
+        padding: "2px 7px",
+      }}
+    >
+      {type}
+    </span>
+  );
+}
+
 function StepRow({ step }: { step: SimulationStepResult }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   const passed = step.status === "passed" || step.status === "pass";
-  const pct = Math.round(step.confidence_score * 100);
+  const pct = Math.round((step.confidence_score ?? 0) * 100);
+  const barColor = pct >= 70 ? C.teal : pct >= 40 ? "#d97706" : C.red;
 
   return (
-    <div className="border border-gray-800 rounded-lg overflow-hidden">
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: "hidden" }}>
       <button
         type="button"
-        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-800/30 transition-colors"
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => setOpen(!open)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          width: "100%",
+          padding: "10px 14px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
       >
-        <div className={clsx("shrink-0", passed ? "text-emerald-400" : "text-red-400")}>
-          {passed ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-        </div>
-        <span className="flex-1 text-sm font-medium text-gray-200">{step.step_name}</span>
-        <span className="text-xs text-gray-500">{formatDuration(step.duration_ms)}</span>
-        <div className="flex items-center gap-1.5 w-24">
-          <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
-            <div
-              className={clsx(
-                "h-full rounded-full",
-                pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-red-500"
-              )}
-              style={{ width: `${pct}%` }}
-            />
+        <StatusDot passed={passed} />
+        <span style={{ flex: 1, fontSize: 13, color: C.text }}>{step.step_name}</span>
+        <span style={{ fontSize: 11, color: C.muted }}>{formatDuration(step.duration_ms)}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, width: 100 }}>
+          <div
+            style={{
+              flex: 1,
+              height: 4,
+              borderRadius: 2,
+              background: C.raised,
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 2 }} />
           </div>
-          <span className="text-xs text-gray-500 tabular-nums">{pct}%</span>
+          <span style={{ fontSize: 11, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+            {pct}%
+          </span>
         </div>
         <ChevronDown
-          className={clsx(
-            "h-3.5 w-3.5 text-gray-600 transition-transform shrink-0",
-            expanded && "rotate-180"
-          )}
+          style={{
+            width: 14,
+            height: 14,
+            color: C.muted,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 0.15s",
+          }}
         />
       </button>
-      {expanded && (
-        <div className="border-t border-gray-800 bg-gray-900/40 px-4 py-3 space-y-3 text-xs">
+
+      {open && (
+        <div
+          style={{
+            borderTop: `1px solid ${C.border}`,
+            background: C.base,
+            padding: "12px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
           {step.error_message && (
-            <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-3">
-              <AlertCircle className="h-3.5 w-3.5 text-red-400 shrink-0 mt-0.5" />
-              <p className="text-red-300">{step.error_message}</p>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                padding: 10,
+                borderRadius: 6,
+                border: `1px solid ${C.red}30`,
+                background: `${C.red}08`,
+              }}
+            >
+              <AlertCircle style={{ width: 14, height: 14, color: C.red, flexShrink: 0, marginTop: 1 }} />
+              <p style={{ fontSize: 12, color: "#fca5a5" }}>{step.error_message}</p>
             </div>
           )}
-          {Object.keys(step.request_payload).length > 0 && (
+          {Object.keys(step.request_payload ?? {}).length > 0 && (
             <div>
-              <p className="text-gray-500 font-medium mb-1">Request</p>
-              <pre className="rounded bg-gray-950 p-2 text-gray-300 overflow-x-auto">
+              <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: C.muted, marginBottom: 6 }}>
+                Request
+              </p>
+              <pre
+                className="mono"
+                style={{
+                  background: "#060b12",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  padding: "10px 12px",
+                  fontSize: 11,
+                  color: C.mutedHi,
+                  overflowX: "auto",
+                  margin: 0,
+                }}
+              >
                 {JSON.stringify(step.request_payload, null, 2)}
               </pre>
             </div>
           )}
-          {Object.keys(step.actual_response).length > 0 && (
+          {Object.keys(step.actual_response ?? {}).length > 0 && (
             <div>
-              <p className="text-gray-500 font-medium mb-1">Response</p>
-              <pre className="rounded bg-gray-950 p-2 text-gray-300 overflow-x-auto">
+              <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: C.muted, marginBottom: 6 }}>
+                Response
+              </p>
+              <pre
+                className="mono"
+                style={{
+                  background: "#060b12",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  padding: "10px 12px",
+                  fontSize: 11,
+                  color: C.mutedHi,
+                  overflowX: "auto",
+                  margin: 0,
+                }}
+              >
                 {JSON.stringify(step.actual_response, null, 2)}
               </pre>
             </div>
@@ -101,99 +196,115 @@ function StepRow({ step }: { step: SimulationStepResult }) {
   );
 }
 
-function SimCard({ sim, configName }: { sim: Simulation; configName?: string }) {
-  const [showSteps, setShowSteps] = useState(false);
-  const st = statusConfig[sim.status] ?? { label: sim.status, icon: Clock, cls: "badge-gray" };
-  const StatusIcon = st.icon;
-  const successPct =
-    sim.total_tests > 0 ? Math.round((sim.passed_tests / sim.total_tests) * 100) : 0;
+function SimRow({ sim, configName }: { sim: Simulation; configName?: string }) {
+  const [open, setOpen] = useState(false);
+  const passed = sim.status === "passed";
+  const successPct = sim.total_tests > 0 ? Math.round((sim.passed_tests / sim.total_tests) * 100) : 0;
 
   return (
-    <div className="card overflow-hidden">
-      <div className="p-5">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-gray-800 p-2">
-              <FlaskConical className="h-4 w-4 text-gray-400" />
-            </div>
-            <div>
-              <h3 className="font-medium text-white">
-                {configName ? configName : `Config: ${sim.configuration_id.slice(0, 8)}…`}
-              </h3>
-              <p className="mt-0.5 text-xs text-gray-500">
-                {new Date(sim.created_at).toLocaleString()} &middot; {sim.test_type}
-              </p>
-            </div>
-          </div>
-          <span className={st.cls}>
-            <StatusIcon
-              className={clsx("mr-1 h-3 w-3", sim.status === "running" && "animate-spin")}
-            />
-            {st.label}
-          </span>
+    <div
+      style={{
+        border: `1px solid ${C.border}`,
+        borderRadius: 8,
+        background: C.elevated,
+        overflow: "hidden",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto auto auto auto auto",
+          alignItems: "center",
+          gap: 14,
+          width: "100%",
+          padding: "14px 18px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        <StatusDot passed={passed} />
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+            {configName ?? `Config ${sim.configuration_id.slice(0, 8)}`}
+          </p>
+          <p style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+            {new Date(sim.created_at).toLocaleString()}
+          </p>
         </div>
+        <TestTypeBadge type={sim.test_type} />
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: successPct >= 90 ? C.teal : successPct >= 70 ? "#d97706" : C.red,
+            minWidth: 40,
+            textAlign: "right",
+          }}
+        >
+          {successPct}%
+        </span>
+        <span style={{ fontSize: 12, color: C.muted }}>
+          {sim.passed_tests}/{sim.total_tests} passed
+        </span>
+        <span style={{ fontSize: 12, color: C.muted }}>{formatDuration(sim.duration_ms)}</span>
+        <ChevronDown
+          style={{
+            width: 14,
+            height: 14,
+            color: C.muted,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 0.15s",
+          }}
+        />
+      </button>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-          <div className="rounded-lg bg-gray-800/50 p-3">
-            <p className="text-xs text-gray-500">Success Rate</p>
-            <p
-              className={clsx(
-                "mt-1 text-lg font-bold",
-                successPct >= 95
-                  ? "text-emerald-400"
-                  : successPct >= 80
-                    ? "text-amber-400"
-                    : "text-red-400"
-              )}
-            >
-              {successPct}%
-            </p>
-          </div>
-          <div className="rounded-lg bg-gray-800/50 p-3">
-            <p className="text-xs text-gray-500">Tests</p>
-            <p className="mt-1 text-lg font-bold text-white">
-              {sim.passed_tests}
-              <span className="text-xs font-normal text-gray-500">/{sim.total_tests}</span>
-            </p>
-          </div>
-          <div className="rounded-lg bg-gray-800/50 p-3">
-            <p className="text-xs text-gray-500">Failed</p>
-            <p className="mt-1 text-lg font-bold text-red-400">{sim.failed_tests}</p>
-          </div>
-          <div className="rounded-lg bg-gray-800/50 p-3">
-            <p className="text-xs text-gray-500">Duration</p>
-            <p className="mt-1 text-lg font-bold text-gray-300">
-              {formatDuration(sim.duration_ms)}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {sim.steps && sim.steps.length > 0 && (
-        <div className="border-t border-gray-800">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between px-5 py-3 text-xs text-gray-500 hover:text-gray-300 hover:bg-gray-800/30 transition-colors"
-            onClick={() => setShowSteps(!showSteps)}
+      {open && sim.steps && sim.steps.length > 0 && (
+        <div
+          style={{
+            borderTop: `1px solid ${C.border}`,
+            padding: "14px 18px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: C.muted,
+              marginBottom: 4,
+            }}
           >
-            <span className="font-medium">Step Results ({sim.steps.length})</span>
-            <ChevronDown
-              className={clsx("h-3.5 w-3.5 transition-transform", showSteps && "rotate-180")}
-            />
-          </button>
-          {showSteps && (
-            <div className="px-5 pb-4 space-y-2">
-              {sim.steps.map((step, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: steps lack stable id
-                <StepRow key={i} step={step} />
-              ))}
-            </div>
-          )}
+            Steps ({sim.steps.length})
+          </p>
+          {sim.steps.map((step, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: steps lack stable id
+            <StepRow key={i} step={step} />
+          ))}
         </div>
       )}
     </div>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  background: C.raised,
+  border: `1px solid ${C.border}`,
+  borderRadius: 6,
+  padding: "8px 12px",
+  fontSize: 13,
+  color: C.text,
+  outline: "none",
+  boxSizing: "border-box",
+};
 
 export default function Simulations() {
   const queryClient = useQueryClient();
@@ -201,20 +312,21 @@ export default function Simulations() {
   const [configId, setConfigId] = useState("");
   const [testType, setTestType] = useState("full");
   const [runError, setRunError] = useState<string | null>(null);
-  const [recentSims, setRecentSims] = useState<Simulation[]>([]);
 
-  const { data: configData, isLoading: configsLoading } = useQuery({
+  const { data: configData } = useQuery({
     queryKey: ["configurations"],
     queryFn: () => configurationsApi.list(),
   });
 
+  const { data: simsData, isLoading: simsLoading } = useQuery({
+    queryKey: ["simulations"],
+    queryFn: () => simulationsApi.list(),
+  });
+
   const runMutation = useMutation({
     mutationFn: simulationsApi.run,
-    onSuccess: (response) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["simulations"] });
-      if (response.data) {
-        setRecentSims((prev) => [response.data as Simulation, ...prev]);
-      }
       setShowForm(false);
       setConfigId("");
       setRunError(null);
@@ -225,24 +337,38 @@ export default function Simulations() {
   });
 
   const configs: Configuration[] = configData?.data ?? [];
+  const sims: Simulation[] = simsData?.data ?? [];
 
-  const chartData = recentSims
+  const totalSims = sims.length;
+  const passedSims = sims.filter((s) => s.status === "passed").length;
+  const passRate = totalSims > 0 ? Math.round((passedSims / totalSims) * 100) : null;
+  const avgDuration =
+    sims.length > 0
+      ? Math.round(sims.reduce((acc, s) => acc + (s.duration_ms ?? 0), 0) / sims.length)
+      : null;
+
+  const chartData = sims
     .filter((s) => s.total_tests > 0)
+    .slice(0, 10)
     .map((s) => {
       const cfg = configs.find((c) => c.id === s.configuration_id);
       return {
-        name: cfg ? cfg.name.slice(0, 12) : s.configuration_id.slice(0, 8),
-        success: Math.round((s.passed_tests / s.total_tests) * 100),
+        name: cfg ? cfg.name.slice(0, 14) : s.configuration_id.slice(0, 8),
+        passed: s.passed_tests,
         failed: s.failed_tests,
       };
-    });
+    })
+    .reverse();
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <h1 className="text-2xl font-bold text-white">Simulations</h1>
-          <p className="mt-1 text-sm text-gray-400">Run and monitor integration simulations</p>
+          <h1 style={{ fontSize: 20, fontWeight: 600, color: C.text, margin: 0 }}>Simulations</h1>
+          <p style={{ fontSize: 13, color: C.muted, margin: "4px 0 0" }}>
+            Run and review integration test simulations
+          </p>
         </div>
         <button
           type="button"
@@ -256,36 +382,96 @@ export default function Simulations() {
             "Cancel"
           ) : (
             <>
-              <Play className="h-4 w-4" /> Run Simulation
+              <Play style={{ width: 14, height: 14 }} /> Run Simulation
             </>
           )}
         </button>
       </div>
 
+      {/* Summary stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+        {(
+          [
+            { label: "Total Runs", value: totalSims || "—" },
+            {
+              label: "Pass Rate",
+              value: passRate !== null ? `${passRate}%` : "—",
+              color: passRate !== null ? (passRate >= 80 ? C.teal : C.red) : undefined,
+            },
+            { label: "Avg Duration", value: avgDuration ? formatDuration(avgDuration) : "—" },
+          ] as { label: string; value: string | number; color?: string }[]
+        ).map(({ label, value, color }) => (
+          <div
+            key={label}
+            style={{
+              background: C.elevated,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              padding: "16px 20px",
+            }}
+          >
+            <p
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: C.muted,
+                margin: 0,
+              }}
+            >
+              {label}
+            </p>
+            <p
+              style={{
+                fontSize: 24,
+                fontWeight: 700,
+                color: color ?? C.text,
+                margin: "6px 0 0",
+              }}
+            >
+              {value}
+            </p>
+          </div>
+        ))}
+      </div>
+
       {/* Run form */}
       {showForm && (
-        <div className="card p-6">
-          <div className="mb-4 flex items-center gap-2">
-            <Zap className="h-4 w-4 text-indigo-400" />
-            <h2 className="font-semibold text-white">New Simulation</h2>
+        <div
+          style={{
+            background: C.elevated,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: "20px 24px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+            <Zap style={{ width: 15, height: 15, color: C.teal }} />
+            <h2 style={{ fontSize: 15, fontWeight: 600, color: C.text, margin: 0 }}>New Simulation</h2>
           </div>
           <form
             onSubmit={(e) => {
               e.preventDefault();
               if (configId) {
                 setRunError(null);
-                runMutation.mutate({
-                  configuration_id: configId,
-                  test_type: testType,
-                });
+                runMutation.mutate({ configuration_id: configId, test_type: testType });
               }
             }}
-            className="grid gap-4 sm:grid-cols-3"
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 14, alignItems: "end" }}
           >
             <div>
               <label
                 htmlFor="sim-config"
-                className="mb-1.5 block text-xs font-medium text-gray-400"
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: C.muted,
+                  marginBottom: 6,
+                }}
               >
                 Configuration
               </label>
@@ -293,10 +479,9 @@ export default function Simulations() {
                 id="sim-config"
                 value={configId}
                 onChange={(e) => setConfigId(e.target.value)}
-                disabled={configsLoading}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                style={inputStyle}
               >
-                <option value="">Select configuration...</option>
+                <option value="">Select configuration…</option>
                 {configs.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} — {c.status}
@@ -305,81 +490,157 @@ export default function Simulations() {
               </select>
             </div>
             <div>
-              <label htmlFor="test-type" className="mb-1.5 block text-xs font-medium text-gray-400">
+              <label
+                htmlFor="test-type"
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: C.muted,
+                  marginBottom: 6,
+                }}
+              >
                 Test Type
               </label>
               <select
                 id="test-type"
                 value={testType}
                 onChange={(e) => setTestType(e.target.value)}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                style={inputStyle}
               >
                 <option value="full">Full</option>
                 <option value="smoke">Smoke</option>
                 <option value="integration">Integration</option>
               </select>
             </div>
-            <div className="flex items-end">
-              <button
-                type="submit"
-                className="btn-primary w-full justify-center"
-                disabled={!configId || runMutation.isPending}
-              >
-                <Play className="h-4 w-4" />
-                {runMutation.isPending ? "Running..." : "Run"}
-              </button>
-            </div>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={!configId || runMutation.isPending}
+              style={{ whiteSpace: "nowrap" }}
+            >
+              {runMutation.isPending ? (
+                <>
+                  <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} />
+                  Running…
+                </>
+              ) : (
+                <>
+                  <Play style={{ width: 14, height: 14 }} /> Run
+                </>
+              )}
+            </button>
           </form>
           {runError && (
-            <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-400">
+            <div
+              style={{
+                marginTop: 12,
+                padding: "10px 14px",
+                borderRadius: 6,
+                border: `1px solid ${C.red}30`,
+                background: `${C.red}08`,
+                fontSize: 13,
+                color: "#fca5a5",
+              }}
+            >
               {runError}
             </div>
           )}
         </div>
       )}
 
-      {/* Results chart */}
+      {/* Chart */}
       {chartData.length > 0 && (
-        <div className="card p-6">
-          <div className="mb-4 flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-gray-400" />
-            <h2 className="font-semibold text-white">Success Rates</h2>
+        <div
+          style={{
+            background: C.elevated,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: "20px 24px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+            <BarChart3 style={{ width: 15, height: 15, color: C.muted }} />
+            <h2 style={{ fontSize: 15, fontWeight: 600, color: C.text, margin: 0 }}>
+              Test Results by Run
+            </h2>
           </div>
-          <div className="h-52">
+          <div style={{ height: 200 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis type="number" domain={[0, 100]} stroke="#6b7280" fontSize={12} />
-                <YAxis type="category" dataKey="name" stroke="#6b7280" fontSize={11} width={80} />
+              <BarChart data={chartData} layout="vertical" barCategoryGap="30%">
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false} />
+                <XAxis type="number" stroke={C.muted} fontSize={11} />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  stroke={C.muted}
+                  fontSize={11}
+                  width={90}
+                  tick={{ fill: C.mutedHi }}
+                />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "#111827",
-                    border: "1px solid #374151",
-                    borderRadius: "8px",
-                    fontSize: "12px",
+                    background: C.raised,
+                    border: `1px solid ${C.borderHi}`,
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: C.text,
                   }}
+                  cursor={{ fill: `${C.border}60` }}
                 />
-                <Bar dataKey="success" fill="#6366f1" radius={[0, 4, 4, 0]} name="Success %" />
+                <Bar dataKey="passed" fill={C.teal} radius={[0, 3, 3, 0]} name="Passed" stackId="a" />
+                <Bar dataKey="failed" fill={C.red} radius={[0, 3, 3, 0]} name="Failed" stackId="a" />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
       )}
 
-      {/* Simulation list */}
-      <div className="space-y-3">
-        {recentSims.length === 0 ? (
-          <div className="card flex flex-col items-center justify-center py-16 text-center">
-            <FlaskConical className="mb-3 h-10 w-10 text-gray-600" />
-            <p className="text-sm font-medium text-gray-400">No simulations yet</p>
-            <p className="mt-1 text-xs text-gray-600">
+      {/* Simulations list */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {simsLoading ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              padding: "48px 0",
+              color: C.muted,
+              fontSize: 13,
+            }}
+          >
+            <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} />
+            Loading simulations…
+          </div>
+        ) : sims.length === 0 ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "64px 0",
+              gap: 10,
+              background: C.elevated,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+            }}
+          >
+            <FlaskConical style={{ width: 40, height: 40, color: C.border }} />
+            <p style={{ fontSize: 14, fontWeight: 600, color: C.mutedHi, margin: 0 }}>
+              No simulations yet
+            </p>
+            <p style={{ fontSize: 12, color: C.muted, margin: 0 }}>
               Click "Run Simulation" to test an integration configuration.
             </p>
           </div>
         ) : (
-          recentSims.map((sim) => {
+          sims.map((sim) => {
             const cfg = configs.find((c) => c.id === sim.configuration_id);
-            return <SimCard key={sim.id} sim={sim} configName={cfg?.name} />;
+            return <SimRow key={sim.id} sim={sim} configName={cfg?.name} />;
           })
         )}
       </div>

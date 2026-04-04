@@ -1,3 +1,4 @@
+import ErrorBoundary from "@/components/ErrorBoundary";
 import Layout from "@/components/Layout";
 import NotFound from "@/components/NotFound";
 import { ToastProvider } from "@/components/Toast";
@@ -24,24 +25,26 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/adapters" element={<Adapters />} />
-              <Route path="/documents" element={<Documents />} />
-              <Route path="/configurations" element={<Configurations />} />
-              <Route path="/simulations" element={<Simulations />} />
-              <Route path="/audit" element={<Audit />} />
-              <Route path="/search" element={<Search />} />
-              <Route path="/webhooks" element={<Webhooks />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </ToastProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/adapters" element={<Adapters />} />
+                <Route path="/documents" element={<Documents />} />
+                <Route path="/configurations" element={<Configurations />} />
+                <Route path="/simulations" element={<Simulations />} />
+                <Route path="/audit" element={<Audit />} />
+                <Route path="/search" element={<Search />} />
+                <Route path="/webhooks" element={<Webhooks />} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
