@@ -15,7 +15,7 @@ def _is_insecure(value: str) -> bool:
 
 
 class Settings(BaseSettings):
-    app_name: str = "FinSpark Integration Engine"
+    app_name: str = "AdaptConfig Integration Engine"
     app_version: str = "0.1.0"
     debug: bool = False
 

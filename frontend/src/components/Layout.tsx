@@ -83,7 +83,7 @@ export default function Layout() {
             <Zap className="h-3.5 w-3.5 text-white" />
           </div>
           <span className="text-sm font-bold tracking-tight" style={{ color: "var(--color-text-primary)" }}>
-            FinSpark
+            AdaptConfig
           </span>
           <button
             type="button"
@@ -140,10 +140,10 @@ export default function Layout() {
         {/* Footer */}
         <div className="px-5 py-3" style={{ borderTop: "1px solid var(--color-border)" }}>
           <p className="text-[10px] font-medium" style={{ color: "var(--color-text-muted)" }}>
-            FinSpark v0.1.0
+            AdaptConfig v0.1.0
           </p>
           <p className="text-[10px]" style={{ color: "var(--color-text-muted)", opacity: 0.6 }}>
-            Enterprise Integration Platform
+            AI-Powered Integration Configuration Platform
           </p>
         </div>
       </aside>

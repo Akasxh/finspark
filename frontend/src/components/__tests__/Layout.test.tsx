@@ -13,9 +13,9 @@ vi.mock("react-router-dom", () => ({
 }));
 
 describe("Layout", () => {
-  it("renders the FinSpark brand name", () => {
+  it("renders the AdaptConfig brand name", () => {
     render(<Layout />);
-    expect(screen.getByText("FinSpark")).toBeInTheDocument();
+    expect(screen.getByText("AdaptConfig")).toBeInTheDocument();
   });
 
   it("renders all navigation group labels", () => {

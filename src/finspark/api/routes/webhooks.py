@@ -1,6 +1,7 @@
 """Webhook management routes."""
 
 import json
+import logging
 import time
 import uuid
 from datetime import UTC, datetime
@@ -18,6 +19,8 @@ from finspark.core.url_validator import is_safe_url
 from finspark.models.webhook import Webhook, WebhookDelivery
 from finspark.schemas.common import APIResponse, TenantContext
 from finspark.schemas.webhooks import WebhookCreate, WebhookDeliveryResponse, WebhookResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
@@ -44,6 +47,14 @@ async def register_webhook(
     """Register a new webhook endpoint."""
     if not is_safe_url(str(body.url)):
         raise HTTPException(status_code=400, detail="URL resolves to a blocked or private network address")
+
+    if body.tenant_id != tenant.tenant_id:
+        logger.warning(
+            "tenant_id_mismatch_on_webhook_create body_tenant=%s context_tenant=%s",
+            body.tenant_id,
+            tenant.tenant_id,
+        )
+        raise HTTPException(status_code=403, detail="tenant_id does not match authenticated tenant")
 
     wh = Webhook(
         id=str(uuid.uuid4()),

@@ -1,3 +1,3 @@
-"""FinSpark: AI-Assisted Integration Configuration & Orchestration Engine."""
+"""AdaptConfig: AI-Powered Integration Configuration Platform."""
 
 __version__ = "0.1.0"

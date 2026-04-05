@@ -1,4 +1,4 @@
-# FinSpark — Feature & UI Connection Tracker
+# AdaptConfig — Feature & UI Connection Tracker
 
 ## Status: All issues closed. App fully functional.
 

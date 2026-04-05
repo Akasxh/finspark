@@ -125,7 +125,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="AI-Assisted Integration Configuration & Orchestration Engine for Enterprise Lending Platforms",
+    description="AI-Powered Integration Configuration Platform",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",

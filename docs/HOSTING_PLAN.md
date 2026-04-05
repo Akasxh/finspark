@@ -1,4 +1,4 @@
-# FinSpark Hosting Plan
+# AdaptConfig Hosting Plan
 
 ## Recommended: Render (Free Tier)
 
@@ -9,7 +9,7 @@
 
 ### Step 1: Create PostgreSQL Database (5 min)
 1. Go to render.com → Dashboard → New → PostgreSQL
-2. Name: `finspark-db`
+2. Name: `adaptconfig-db`
 3. Plan: Free (90-day, 256MB)
 4. Region: Oregon (closest to Google AI)
 5. Copy the **Internal Database URL**
@@ -18,7 +18,7 @@
 1. Dashboard → New → Web Service
 2. Connect your GitHub repo
 3. Settings:
-   - **Name**: `finspark-api`
+   - **Name**: `adaptconfig-api`
    - **Root Directory**: (leave empty — uses root Dockerfile)
    - **Build Command**: `cd backend && pip install .`
    - **Start Command**: `cd backend && uvicorn finspark.main:app --host 0.0.0.0 --port $PORT`
@@ -32,7 +32,7 @@
    GEMINI_API_KEY=<your key>
    GEMINI_MODEL=gemini-3-flash-preview
    AI_ENABLED=true
-   ALLOWED_ORIGINS=["https://finspark-frontend.onrender.com"]
+   ALLOWED_ORIGINS=["https://adaptconfig-frontend.onrender.com"]
    ```
 5. Health Check Path: `/health`
 
@@ -40,13 +40,13 @@
 1. Dashboard → New → Static Site
 2. Connect same GitHub repo
 3. Settings:
-   - **Name**: `finspark-frontend`
+   - **Name**: `adaptconfig-frontend`
    - **Root Directory**: `frontend`
    - **Build Command**: `npm ci && npm run build`
    - **Publish Directory**: `frontend/dist`
 4. Environment Variables:
    ```
-   VITE_API_URL=https://finspark-api.onrender.com
+   VITE_API_URL=https://adaptconfig-api.onrender.com
    ```
 5. Redirect/Rewrite Rules:
    - `/*` → `/index.html` (SPA routing)
@@ -59,10 +59,10 @@ The frontend needs to call the backend directly (no Vite proxy in production):
 ### Step 5: Verify
 ```bash
 # Health
-curl https://finspark-api.onrender.com/health
+curl https://adaptconfig-api.onrender.com/health
 
 # Frontend
-open https://finspark-frontend.onrender.com
+open https://adaptconfig-frontend.onrender.com
 ```
 
 ---
