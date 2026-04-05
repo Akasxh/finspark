@@ -8,3 +8,5 @@ node_modules
 uploads/
 dist/
 .pytest_cache
+.env
+backend/.env
