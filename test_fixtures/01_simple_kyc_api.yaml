@@ -1,0 +1,65 @@
+openapi: "3.0.3"
+info:
+  title: Simple KYC Verification API
+  version: "1.0.0"
+  description: Basic Aadhaar-based KYC verification for customer onboarding.
+
+servers:
+  - url: https://api.kyc-provider.in/v1
+
+security:
+  - ApiKey: []
+
+paths:
+  /verify/aadhaar:
+    post:
+      summary: Verify Aadhaar number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - aadhaar_number
+                - customer_name
+              properties:
+                aadhaar_number:
+                  type: string
+                  description: 12-digit Aadhaar number
+                  example: "123456789012"
+                customer_name:
+                  type: string
+                  description: Name as on Aadhaar card
+                  example: "Rahul Sharma"
+                date_of_birth:
+                  type: string
+                  format: date
+                  example: "1990-05-15"
+                mobile_number:
+                  type: string
+                  example: "9876543210"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                    example: true
+                  name_match_score:
+                    type: number
+                    example: 0.95
+                  reference_id:
+                    type: string
+                    example: "KYC-2026-001"
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key

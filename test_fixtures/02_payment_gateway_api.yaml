@@ -1,0 +1,227 @@
+openapi: "3.0.3"
+info:
+  title: Payment Gateway API
+  version: "2.0.0"
+  description: |
+    Full-featured payment processing gateway supporting UPI, NEFT, IMPS, RTGS.
+    Used for loan disbursement and EMI collection in lending platforms.
+
+    SLA: 2s timeout for payment creation, 5s for settlement queries.
+    All transactions must be idempotent using reference_id.
+
+servers:
+  - url: https://api.payment-gateway.in/v2
+    description: Production
+  - url: https://sandbox.payment-gateway.in/v2
+    description: Sandbox
+
+security:
+  - BearerAuth: []
+
+paths:
+  /payments/create:
+    post:
+      operationId: createPayment
+      summary: Create a payment order
+      description: Initiates a payment transaction. Returns an order_id for tracking.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amount
+                - currency
+                - payment_mode
+                - beneficiary_account
+                - beneficiary_ifsc
+                - reference_id
+              properties:
+                amount:
+                  type: number
+                  description: Amount in INR (paise precision)
+                  example: 50000.00
+                currency:
+                  type: string
+                  enum: [INR]
+                  default: INR
+                payment_mode:
+                  type: string
+                  enum: [UPI, NEFT, IMPS, RTGS]
+                  description: Payment transfer mode
+                beneficiary_account:
+                  type: string
+                  description: Beneficiary bank account number
+                  example: "1234567890123456"
+                beneficiary_ifsc:
+                  type: string
+                  pattern: "^[A-Z]{4}0[A-Z0-9]{6}$"
+                  description: IFSC code of beneficiary bank
+                  example: "SBIN0001234"
+                beneficiary_name:
+                  type: string
+                  description: Name of the beneficiary
+                  example: "Priya Patel"
+                reference_id:
+                  type: string
+                  description: Your unique idempotency key
+                  example: "LOAN-DISB-2026-00142"
+                vpa:
+                  type: string
+                  description: UPI VPA (required when payment_mode=UPI)
+                  example: "priya@upi"
+                remarks:
+                  type: string
+                  description: Transaction narration
+                  example: "Loan disbursement - Application #APP-2026-142"
+      responses:
+        "201":
+          description: Payment order created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id:
+                    type: string
+                    example: "PAY-2026-00891"
+                  status:
+                    type: string
+                    enum: [pending, processing, completed, failed]
+                  utr_number:
+                    type: string
+                    description: UTR (Unique Transaction Reference) when available
+                  created_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: Invalid request
+        "409":
+          description: Duplicate reference_id
+
+  /payments/{order_id}:
+    get:
+      operationId: getPaymentStatus
+      summary: Get payment status
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Payment details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pending, processing, completed, failed, reversed]
+                  amount:
+                    type: number
+                  utr_number:
+                    type: string
+                  settlement_date:
+                    type: string
+                    format: date
+                  failure_reason:
+                    type: string
+
+  /refunds/create:
+    post:
+      operationId: createRefund
+      summary: Initiate a refund
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - order_id
+                - amount
+                - reason
+              properties:
+                order_id:
+                  type: string
+                  description: Original payment order ID
+                amount:
+                  type: number
+                  description: Refund amount (can be partial)
+                reason:
+                  type: string
+                  enum: [customer_request, duplicate, fraud, loan_cancellation]
+      responses:
+        "201":
+          description: Refund initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  refund_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [initiated, processing, completed, failed]
+                  estimated_completion:
+                    type: string
+                    format: date
+
+  /settlements:
+    get:
+      operationId: listSettlements
+      summary: List settlement reports
+      parameters:
+        - name: from_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, settled, failed]
+      responses:
+        "200":
+          description: Settlement list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settlements:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        settlement_id:
+                          type: string
+                        date:
+                          type: string
+                          format: date
+                        total_amount:
+                          type: number
+                        transaction_count:
+                          type: integer
+                        status:
+                          type: string
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

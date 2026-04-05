@@ -1,0 +1,369 @@
+openapi: "3.0.3"
+info:
+  title: Account Aggregator Framework API
+  version: "2.1.0"
+  description: |
+    RBI-regulated Account Aggregator (AA) framework for consented financial data sharing.
+    Implements the DEPA (Data Empowerment and Protection Architecture) standard.
+
+    This is the most complex integration — involves multi-step consent lifecycle,
+    encrypted FI data fetch, multi-FIP (Financial Information Provider) support,
+    and strict compliance requirements under RBI Master Direction on Account Aggregators.
+
+    Security: Mutual TLS with client certificates. All FI data encrypted with
+    Curve25519 key exchange. Consent artifacts are digitally signed with JWS.
+
+    SLA: Consent creation 3s, FI fetch 10s per FIP, session timeout 30 minutes.
+
+servers:
+  - url: https://api.account-aggregator.in/v2.1
+    description: Production (AA Ecosystem)
+
+security:
+  - MutualTLS: []
+  - ConsentToken: []
+
+paths:
+  /consent/create:
+    post:
+      operationId: createConsentRequest
+      summary: Create a consent request for financial data access
+      description: |
+        Initiates a consent request. The customer receives a notification
+        on their AA app and must approve/reject within the validity window.
+        Supports multiple FI types and FIP combinations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - customer_vua
+                - purpose
+                - fi_types
+                - consent_duration
+                - data_range
+                - frequency
+              properties:
+                customer_vua:
+                  type: string
+                  description: Customer's Virtual User Address (e.g., user@aa-provider)
+                  example: "akash.kumar@onemoney"
+                purpose:
+                  type: object
+                  required:
+                    - code
+                    - text
+                  properties:
+                    code:
+                      type: string
+                      enum: ["101", "102", "103", "104", "105"]
+                      description: |
+                        Purpose codes per AA spec:
+                        101 - Wealth management
+                        102 - Customer spending patterns
+                        103 - Aggregated statement
+                        104 - Expense tracking
+                        105 - Loan underwriting
+                    text:
+                      type: string
+                      example: "Loan underwriting for personal loan application"
+                    ref_uri:
+                      type: string
+                      format: uri
+                      description: Reference URI for the purpose documentation
+                fi_types:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - DEPOSIT
+                      - TERM_DEPOSIT
+                      - RECURRING_DEPOSIT
+                      - SIP
+                      - MUTUAL_FUNDS
+                      - INSURANCE
+                      - GOVT_SECURITIES
+                      - EQUITIES
+                      - ETF
+                      - NPS
+                      - CREDIT_CARD
+                  description: Financial information types to request
+                  example: ["DEPOSIT", "MUTUAL_FUNDS", "CREDIT_CARD"]
+                fip_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Specific FIP IDs to request from (optional — all FIPs if omitted)
+                  example: ["SBI-FIP", "HDFC-FIP", "ICICI-FIP"]
+                consent_duration:
+                  type: string
+                  description: ISO 8601 duration for consent validity
+                  example: "P1Y"
+                data_range:
+                  type: object
+                  required:
+                    - from
+                    - to
+                  properties:
+                    from:
+                      type: string
+                      format: date
+                      description: Start date for financial data
+                      example: "2024-04-01"
+                    to:
+                      type: string
+                      format: date
+                      description: End date for financial data
+                      example: "2026-03-31"
+                frequency:
+                  type: object
+                  required:
+                    - type
+                    - value
+                  properties:
+                    type:
+                      type: string
+                      enum: [HOURLY, DAILY, MONTHLY, YEARLY, AS_AVAILABLE]
+                    value:
+                      type: integer
+                      description: How often data can be fetched within consent validity
+                      example: 12
+                data_filter:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum: [TRANSACTIONTYPE, TRANSACTIONAMOUNT]
+                      operator:
+                        type: string
+                        enum: ["=", "!=", ">", "<", ">=", "<="]
+                      value:
+                        type: string
+                  description: Optional filters on the financial data
+                callback_url:
+                  type: string
+                  format: uri
+                  description: Webhook URL for consent status notifications
+                  example: "https://api.lender.com/webhooks/aa-consent"
+      responses:
+        "201":
+          description: Consent request created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consent_handle:
+                    type: string
+                    description: Handle to track consent status
+                    example: "CNS-2026-00891-A"
+                  consent_status:
+                    type: string
+                    enum: [PENDING, APPROVED, REJECTED, REVOKED, EXPIRED, PAUSED]
+                  expiry:
+                    type: string
+                    format: date-time
+                    description: Time after which pending consent auto-expires
+                  redirect_url:
+                    type: string
+                    description: URL for customer to approve consent (if web flow)
+
+  /consent/{consent_handle}/status:
+    get:
+      operationId: getConsentStatus
+      summary: Check consent approval status
+      parameters:
+        - name: consent_handle
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current consent status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consent_handle:
+                    type: string
+                  consent_id:
+                    type: string
+                    description: Assigned after approval (null if pending)
+                  status:
+                    type: string
+                    enum: [PENDING, APPROVED, REJECTED, REVOKED, EXPIRED, PAUSED]
+                  approved_fi_types:
+                    type: array
+                    items:
+                      type: string
+                    description: FI types the customer actually approved (may be subset)
+                  approved_fips:
+                    type: array
+                    items:
+                      type: string
+                  valid_until:
+                    type: string
+                    format: date-time
+
+  /fi/fetch:
+    post:
+      operationId: fetchFinancialData
+      summary: Fetch financial information using approved consent
+      description: |
+        Fetches encrypted financial data from FIPs. Data is encrypted using
+        the session key established during consent approval.
+        Returns data from all approved FIPs in a single response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - consent_id
+                - session_key
+              properties:
+                consent_id:
+                  type: string
+                  description: Consent ID from approved consent
+                  example: "CNS-2026-00891-A-APPROVED"
+                session_key:
+                  type: object
+                  required:
+                    - public_key
+                    - nonce
+                  properties:
+                    public_key:
+                      type: string
+                      description: Curve25519 public key (base64 encoded)
+                    nonce:
+                      type: string
+                      description: Random nonce for key exchange (base64 encoded)
+                fi_types:
+                  type: array
+                  items:
+                    type: string
+                  description: Subset of approved FI types to fetch (optional)
+                data_range:
+                  type: object
+                  properties:
+                    from:
+                      type: string
+                      format: date
+                    to:
+                      type: string
+                      format: date
+      responses:
+        "200":
+          description: Financial information data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                  fi_data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        fip_id:
+                          type: string
+                          description: Financial Information Provider ID
+                        fi_type:
+                          type: string
+                        accounts:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              account_ref:
+                                type: string
+                              masked_account_number:
+                                type: string
+                              type:
+                                type: string
+                              summary:
+                                type: object
+                                properties:
+                                  current_balance:
+                                    type: number
+                                  currency:
+                                    type: string
+                              transactions:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    txn_id:
+                                      type: string
+                                    amount:
+                                      type: number
+                                    narration:
+                                      type: string
+                                    type:
+                                      type: string
+                                      enum: [CREDIT, DEBIT]
+                                    date:
+                                      type: string
+                                      format: date-time
+                        status:
+                          type: string
+                          enum: [READY, PENDING, DENIED, TIMEOUT]
+
+  /consent/{consent_id}/revoke:
+    post:
+      operationId: revokeConsent
+      summary: Revoke an active consent
+      parameters:
+        - name: consent_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+                  enum: [customer_request, loan_closure, compliance, security_breach]
+      responses:
+        "200":
+          description: Consent revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consent_id:
+                    type: string
+                  status:
+                    type: string
+                    example: "REVOKED"
+                  revoked_at:
+                    type: string
+                    format: date-time
+
+components:
+  securitySchemes:
+    MutualTLS:
+      type: mutualTLS
+      description: Client certificate authentication (X.509)
+    ConsentToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Consent artifact signed with JWS
