@@ -61,33 +61,38 @@ class TenantMiddleware(BaseHTTPMiddleware):
             response.headers["X-Tenant-ID"] = tenant_id
             return response
 
-        if settings.debug:
-            # Development mode: trust X-Tenant-* headers, safe default role
+        # Check for Bearer token first (works in both debug and production)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[len("Bearer "):]
+            try:
+                payload = decode_jwt_token(token)
+                tenant_id = payload.get("tenant_id", DEFAULT_TENANT_ID)
+                tenant_name = payload.get("tenant_name", DEFAULT_TENANT_NAME)
+                role = payload.get("role", "viewer")
+                request.state.user_id = payload.get("sub", "")
+                request.state.email = payload.get("email", "")
+            except jwt.PyJWTError:
+                if not settings.debug:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Invalid or expired token"},
+                    )
+                # In debug mode, fall through to header-based auth
+                tenant_id = request.headers.get("X-Tenant-ID", DEFAULT_TENANT_ID)
+                tenant_name = request.headers.get("X-Tenant-Name", DEFAULT_TENANT_NAME)
+                role = request.headers.get("X-Tenant-Role", "admin")
+        elif settings.debug:
+            # Debug mode without token: use header-based auth
             tenant_id = request.headers.get("X-Tenant-ID", DEFAULT_TENANT_ID)
             tenant_name = request.headers.get("X-Tenant-Name", DEFAULT_TENANT_NAME)
             role = request.headers.get("X-Tenant-Role", "admin")
         else:
-            # Production mode: require a valid JWT Bearer token
-            auth_header = request.headers.get("Authorization", "")
-            if not auth_header.startswith("Bearer "):
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Missing or invalid Authorization header"},
-                )
-            token = auth_header[len("Bearer "):]
-            try:
-                payload = decode_jwt_token(token)
-            except jwt.PyJWTError:
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Invalid or expired token"},
-                )
-            tenant_id = payload.get("tenant_id", DEFAULT_TENANT_ID)
-            tenant_name = payload.get("tenant_name", DEFAULT_TENANT_NAME)
-            role = payload.get("role", "viewer")
-            # Also expose email and user_id on request state
-            request.state.user_id = payload.get("sub", "")
-            request.state.email = payload.get("email", "")
+            # Production mode without token: reject
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing or invalid Authorization header"},
+            )
 
         request.state.tenant_id = tenant_id
         request.state.tenant_name = tenant_name

@@ -112,10 +112,14 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) ->
     if len(body.password) < 8:
         raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
 
+    from uuid import uuid4
+    user_id = str(uuid4())
     user = User(
+        id=user_id,
         email=body.email,
         name=body.name,
         password_hash=_hash_password(body.password),
+        tenant_id=user_id,  # Each user gets their own tenant for data isolation
     )
     db.add(user)
     await db.flush()
