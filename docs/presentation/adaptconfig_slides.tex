@@ -177,7 +177,7 @@ AI pipeline: Gemini 3 generates config $\to$ Rule engine validates with fuzzy ma
 % ── 6. DASHBOARD ─────────────────────────────────────────────────────────────
 \begin{frame}{Dashboard}
 \begin{center}
-\includegraphics[width=0.85\textwidth]{qa-dashboard-full.png}
+\includegraphics[width=0.85\textwidth]{dashboard-new.png}
 \end{center}
 \end{frame}
 
@@ -210,7 +210,7 @@ AI pipeline: Gemini 3 generates config $\to$ Rule engine validates with fuzzy ma
 % ── 8. PARSED DETAIL ─────────────────────────────────────────────────────────
 \begin{frame}{Parsed Document — 5-Tab Detail View}
 \begin{center}
-\includegraphics[width=0.82\textwidth]{04-document-detail-modal.png}
+\includegraphics[width=0.82\textwidth]{document-parsed-json.png}
 \end{center}
 {\small\centering Summary $\cdot$ Endpoints $\cdot$ Fields (28) $\cdot$ Auth $\cdot$ Raw JSON\par}
 \end{frame}
@@ -219,7 +219,7 @@ AI pipeline: Gemini 3 generates config $\to$ Rule engine validates with fuzzy ma
 \begin{frame}{Step 2: AI Config Generation}
 \begin{columns}
 \begin{column}{0.48\textwidth}
-\includegraphics[width=\textwidth]{qa-config-generate-form.png}
+\includegraphics[width=\textwidth]{config-generate-new.png}
 \end{column}
 \begin{column}{0.48\textwidth}
 \textbf{Two-stage pipeline:}
@@ -240,7 +240,7 @@ AI pipeline: Gemini 3 generates config $\to$ Rule engine validates with fuzzy ma
 % ── 10. FIELD MAPPINGS ───────────────────────────────────────────────────────
 \begin{frame}{Editable Field Mappings}
 \begin{center}
-\includegraphics[width=0.85\textwidth]{09-config-generated.png}
+\includegraphics[width=0.85\textwidth]{field-mappings-new.png}
 \end{center}
 {\small\centering Lifecycle stepper $\cdot$ Editable targets $\cdot$ Transform dropdowns $\cdot$ Confidence bars $\cdot$ Export $\cdot$ History\par}
 \end{frame}
@@ -249,7 +249,7 @@ AI pipeline: Gemini 3 generates config $\to$ Rule engine validates with fuzzy ma
 \begin{frame}{Step 3: Simulation}
 \begin{columns}
 \begin{column}{0.48\textwidth}
-\includegraphics[width=\textwidth]{12-simulation-results.png}
+\includegraphics[width=\textwidth]{simulation-new.png}
 \end{column}
 \begin{column}{0.48\textwidth}
 \textbf{8-step pipeline:}
@@ -270,27 +270,19 @@ AI pipeline: Gemini 3 generates config $\to$ Rule engine validates with fuzzy ma
 \end{frame}
 
 % ── 12. ADAPTERS ─────────────────────────────────────────────────────────────
-\begin{frame}{Adapter Catalog (8 Pre-Built)}
+\begin{frame}{Adapter Catalog (9 Pre-Built + Custom)}
 \begin{center}
-\includegraphics[width=0.85\textwidth]{qa-adapters.png}
+\includegraphics[width=0.85\textwidth]{adapters-9.png}
 \end{center}
-{\small\centering CIBIL $\cdot$ eKYC $\cdot$ GST $\cdot$ Payment $\cdot$ Fraud $\cdot$ SMS $\cdot$ Account Aggregator $\cdot$ Email\par}
+{\small\centering CIBIL · eKYC · GST · Payment · Fraud · SMS · Account Aggregator · Email · Custom\par}
 \end{frame}
 
-% ── 13. SEARCH ───────────────────────────────────────────────────────────────
-\begin{frame}{Search \& Audit}
-\begin{columns}
-\begin{column}{0.48\textwidth}
-\includegraphics[width=\textwidth]{qa-search-results.png}
-\vspace{0.2em}
-{\scriptsize Fuzzy search across adapters, configs, simulations}
-\end{column}
-\begin{column}{0.48\textwidth}
-\includegraphics[width=\textwidth]{qa-audit.png}
-\vspace{0.2em}
-{\scriptsize Immutable audit trail with filters \& pagination}
-\end{column}
-\end{columns}
+% ── 13. AUDIT ────────────────────────────────────────────────────────────────
+\begin{frame}{Audit Trail}
+\begin{center}
+\includegraphics[width=0.85\textwidth]{audit-rich.png}
+\end{center}
+{\small\centering Immutable log of every action $\cdot$ Filter by action type \& resource $\cdot$ Pagination $\cdot$ Per-user isolation\par}
 \end{frame}
 
 % ── 14. RESULTS ──────────────────────────────────────────────────────────────
@@ -320,7 +312,7 @@ Cost per platform & Rs 48--96L & Minimal & \textcolor{ok}{$>$95\% savings} \\
 \textbf{Metric} & \textbf{Value} \\
 \midrule
 API Endpoints & 34 \\
-Adapters & 8 \\
+Adapters & 9 \\
 Tests & 899 \\
 Coverage & 82\% \\
 Pages & 8 \\
