@@ -32,7 +32,11 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = ["*"]
 
     # CORS — origins allowed to make cross-origin requests
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://adaptconfig-frontend-production.up.railway.app",
+    ]
 
     # Rate limiting
     rate_limit_max_requests: int = 100
