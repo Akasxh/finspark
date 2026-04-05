@@ -10,7 +10,7 @@ services:
       - db-data:/app/data
     env_file: .env
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/finspark.db
+      - DATABASE_URL=sqlite+aiosqlite:///./data/adaptconfig.db
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]

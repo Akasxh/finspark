@@ -1,21 +1,21 @@
 services:
   - type: web
-    name: finspark-backend
+    name: adaptconfig-api
     runtime: docker
     dockerfilePath: ./Dockerfile.backend
     envVars:
       - key: PORT
         value: 8000
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./data/finspark.db
+        value: sqlite+aiosqlite:///./data/adaptconfig.db
     healthCheckPath: /api/v1/health
     disk:
-      name: finspark-data
+      name: adaptconfig-data
       mountPath: /app/data
       sizeGB: 1
 
   - type: web
-    name: finspark-frontend
+    name: adaptconfig-frontend
     runtime: static
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist

@@ -1,4 +1,4 @@
-# FinSpark
+# AdaptConfig
 
 AI-assisted integration configuration and orchestration engine for fintech systems.
 
@@ -26,7 +26,7 @@ AI-assisted integration configuration and orchestration engine for fintech syste
 
 ```bash
 # 1. Clone and set up environment
-git clone https://github.com/Akasxh/finspark.git && cd finspark
+git clone https://github.com/Akasxh/adaptconfig.git && cd adaptconfig
 cp .env.example .env
 # Edit .env -- set FINSPARK_SECRET_KEY and optionally FINSPARK_GEMINI_API_KEY
 
@@ -135,7 +135,7 @@ Copy `.env.example` to `.env` and configure:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `FINSPARK_DATABASE_URL` | Async database URI | `sqlite+aiosqlite:///./finspark.db` |
+| `FINSPARK_DATABASE_URL` | Async database URI | `sqlite+aiosqlite:///./adaptconfig.db` |
 | `FINSPARK_SECRET_KEY` | App secret for signing | (required) |
 | `FINSPARK_ENCRYPTION_KEY` | Encryption key for sensitive data | (required) |
 | `FINSPARK_DEBUG` | Enable debug mode | `false` |
