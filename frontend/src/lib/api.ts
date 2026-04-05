@@ -20,6 +20,8 @@ import type {
   VersionComparisonResponse,
 } from "@/types";
 import axios from "axios";
+import { clearTokens, getRefreshToken, getToken, setTokens } from "./auth";
+import type { AuthUser } from "./auth";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "",
@@ -31,18 +33,95 @@ const api = axios.create({
   },
 });
 
+// Attach Bearer token from localStorage on every request
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+let _refreshing: Promise<string | null> | null = null;
+
 api.interceptors.response.use(
   (response) => response,
-  (error: unknown) => {
+  async (error: unknown) => {
     if (axios.isAxiosError(error)) {
       if (error.code === "ECONNABORTED") {
         console.error("[API] Request timed out");
       }
+
+      const status = error.response?.status;
+      const originalRequest = error.config;
+
+      // On 401, try to refresh the token once
+      if (status === 401 && originalRequest && !(originalRequest as { _retry?: boolean })._retry) {
+        (originalRequest as { _retry?: boolean })._retry = true;
+
+        if (!_refreshing) {
+          _refreshing = (async () => {
+            const refreshToken = getRefreshToken();
+            if (!refreshToken) return null;
+            try {
+              const res = await axios.post<{ access_token: string; token_type: string }>(
+                `${api.defaults.baseURL ?? ""}/api/v1/auth/refresh`,
+                { refresh_token: refreshToken }
+              );
+              const newAccess = res.data.access_token;
+              setTokens(newAccess, refreshToken);
+              return newAccess;
+            } catch {
+              clearTokens();
+              window.location.href = "/login";
+              return null;
+            } finally {
+              _refreshing = null;
+            }
+          })();
+        }
+
+        const newToken = await _refreshing;
+        if (newToken && originalRequest.headers) {
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        }
+      }
+
+      if (status === 401) {
+        clearTokens();
+        window.location.href = "/login";
+      }
+
       console.error("[API Error]", error.response?.status, error.message);
     }
     return Promise.reject(error);
   }
 );
+
+// ── Auth API ──────────────────────────────────────────────────────────────────
+
+export interface LoginResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  user: AuthUser;
+}
+
+export const authApi = {
+  register: (data: { email: string; password: string; name: string }) =>
+    api.post<AuthUser>("/api/v1/auth/register", data).then((r) => r.data),
+
+  login: (data: { email: string; password: string }) =>
+    api.post<LoginResponse>("/api/v1/auth/login", data).then((r) => r.data),
+
+  refresh: (refresh_token: string) =>
+    api
+      .post<{ access_token: string; token_type: string }>("/api/v1/auth/refresh", { refresh_token })
+      .then((r) => r.data),
+
+  me: () => api.get<AuthUser>("/api/v1/auth/me").then((r) => r.data),
+};
 
 export const healthApi = {
   check: () => api.get<HealthStatus>("/health").then((r) => r.data),
@@ -62,7 +141,9 @@ export const adaptersApi = {
       .then((r) => r.data),
   deprecation: (adapterId: string, version: string) =>
     api
-      .get<APIResponse<DeprecationInfo>>(`/api/v1/adapters/${adapterId}/versions/${version}/deprecation`)
+      .get<APIResponse<DeprecationInfo>>(
+        `/api/v1/adapters/${adapterId}/versions/${version}/deprecation`
+      )
       .then((r) => r.data),
 };
 
@@ -82,7 +163,9 @@ export const documentsApi = {
       .then((r) => r.data);
   },
   delete: (id: string) =>
-    api.delete<APIResponse<{ id: string; deleted: boolean }>>(`/api/v1/documents/${id}`).then((r) => r.data),
+    api
+      .delete<APIResponse<{ id: string; deleted: boolean }>>(`/api/v1/documents/${id}`)
+      .then((r) => r.data),
 };
 
 export const configurationsApi = {
@@ -104,7 +187,14 @@ export const configurationsApi = {
       .then((r) => r.data),
   transition: (id: string, targetState: string, reason?: string) =>
     api
-      .post<APIResponse<{ id: string; previous_state: string; new_state: string; available_transitions: string[] }>>(`/api/v1/configurations/${id}/transition`, {
+      .post<
+        APIResponse<{
+          id: string;
+          previous_state: string;
+          new_state: string;
+          available_transitions: string[];
+        }>
+      >(`/api/v1/configurations/${id}/transition`, {
         target_state: targetState,
         reason,
       })
@@ -123,10 +213,15 @@ export const configurationsApi = {
       .then((r) => r.data),
   rollback: (id: string, targetVersion: number) =>
     api
-      .post<APIResponse<{ id: string; name: string; previous_version: number; restored_version: number; status: string }>>(
-        `/api/v1/configurations/${id}/rollback`,
-        { target_version: targetVersion },
-      )
+      .post<
+        APIResponse<{
+          id: string;
+          name: string;
+          previous_version: number;
+          restored_version: number;
+          status: string;
+        }>
+      >(`/api/v1/configurations/${id}/rollback`, { target_version: targetVersion })
       .then((r) => r.data),
   getSummary: () =>
     api
@@ -138,17 +233,24 @@ export const configurationsApi = {
       .then((r) => r.data),
   compareVersions: (configId: string, v1: number, v2: number) =>
     api
-      .get<APIResponse<VersionComparisonResponse>>(`/api/v1/configurations/${configId}/history/compare`, {
-        params: { v1, v2 },
-      })
+      .get<APIResponse<VersionComparisonResponse>>(
+        `/api/v1/configurations/${configId}/history/compare`,
+        {
+          params: { v1, v2 },
+        }
+      )
       .then((r) => r.data),
   batchValidate: (configIds: string[]) =>
     api
-      .post<APIResponse<unknown>>("/api/v1/configurations/batch-validate", { config_ids: configIds })
+      .post<APIResponse<unknown>>("/api/v1/configurations/batch-validate", {
+        config_ids: configIds,
+      })
       .then((r) => r.data),
   batchSimulate: (configIds: string[]) =>
     api
-      .post<APIResponse<unknown>>("/api/v1/configurations/batch-simulate", { config_ids: configIds })
+      .post<APIResponse<unknown>>("/api/v1/configurations/batch-simulate", {
+        config_ids: configIds,
+      })
       .then((r) => r.data),
   update: (id: string, data: { name?: string; field_mappings?: FieldMapping[]; notes?: string }) =>
     api.patch<APIResponse<Configuration>>(`/api/v1/configurations/${id}`, data).then((r) => r.data),
@@ -186,8 +288,19 @@ export interface DashboardAnalytics {
   total_processed?: number;
   total_warnings?: number;
   // Backend aggregate fields
-  configurations?: { total: number; by_status: Record<string, number>; active: number; draft: number };
-  simulations?: { total: number; passed: number; failed: number; pass_rate: number; avg_duration_ms: number };
+  configurations?: {
+    total: number;
+    by_status: Record<string, number>;
+    active: number;
+    draft: number;
+  };
+  simulations?: {
+    total: number;
+    passed: number;
+    failed: number;
+    pass_rate: number;
+    avg_duration_ms: number;
+  };
   documents?: { total: number; by_status: Record<string, number> };
   audit_entries?: number;
   health_score?: number;
@@ -196,8 +309,7 @@ export interface DashboardAnalytics {
 export const analyticsApi = {
   dashboard: () =>
     api.get<APIResponse<DashboardAnalytics>>("/api/v1/analytics/dashboard").then((r) => r.data),
-  health: () =>
-    api.get<Record<string, unknown>>("/api/v1/analytics/health").then((r) => r.data),
+  health: () => api.get<Record<string, unknown>>("/api/v1/analytics/health").then((r) => r.data),
 };
 
 export const metricsApi = {
@@ -213,23 +325,50 @@ export const searchApi = {
       .then((r) => r.data),
 };
 
-interface WebhookEntry { id: string; tenant_id: string; url: string; events: string[]; is_active: boolean; created_at: string; }
-interface WebhookTestResult { id: string; webhook_id: string; event_type: string; status: string; response_code: number | null; attempts: number; created_at: string; }
+interface WebhookEntry {
+  id: string;
+  tenant_id: string;
+  url: string;
+  events: string[];
+  is_active: boolean;
+  created_at: string;
+}
+interface WebhookTestResult {
+  id: string;
+  webhook_id: string;
+  event_type: string;
+  status: string;
+  response_code: number | null;
+  attempts: number;
+  created_at: string;
+}
 
 export const webhooksApi = {
   list: () =>
-    api.get<APIResponse<WebhookEntry[]>>("/api/v1/webhooks/", { headers: { "X-Tenant-ID": "default" } }).then((r) => r.data),
+    api
+      .get<APIResponse<WebhookEntry[]>>("/api/v1/webhooks/", {
+        headers: { "X-Tenant-ID": "default" },
+      })
+      .then((r) => r.data),
   create: (data: { url: string; events: string[]; secret: string }) =>
     api
-      .post<APIResponse<WebhookEntry>>("/api/v1/webhooks/", data, { headers: { "X-Tenant-ID": "default" } })
+      .post<APIResponse<WebhookEntry>>("/api/v1/webhooks/", data, {
+        headers: { "X-Tenant-ID": "default" },
+      })
       .then((r) => r.data),
   delete: (id: string) =>
     api
-      .delete<APIResponse<null>>(`/api/v1/webhooks/${id}`, { headers: { "X-Tenant-ID": "default" } })
+      .delete<APIResponse<null>>(`/api/v1/webhooks/${id}`, {
+        headers: { "X-Tenant-ID": "default" },
+      })
       .then((r) => r.data),
   test: (id: string) =>
     api
-      .post<APIResponse<WebhookTestResult>>(`/api/v1/webhooks/${id}/test`, {}, { headers: { "X-Tenant-ID": "default" } })
+      .post<APIResponse<WebhookTestResult>>(
+        `/api/v1/webhooks/${id}/test`,
+        {},
+        { headers: { "X-Tenant-ID": "default" } }
+      )
       .then((r) => r.data),
 };
 

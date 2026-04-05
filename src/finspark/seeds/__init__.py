@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.core.database import async_session_factory
 from finspark.models.adapter import Adapter
@@ -54,3 +53,25 @@ async def seed_adapters() -> None:
 
         await db.commit()
         logger.info("Seeded %d adapters with versions", len(adapters))
+
+
+async def seed_admin_user() -> None:
+    """Create the default admin user if no users exist."""
+    from finspark.api.routes.auth import _hash_password
+    from finspark.models.user import User
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(User).limit(1))
+        if result.scalar_one_or_none():
+            return
+
+        admin = User(
+            email="admin@finspark.dev",
+            name="Admin",
+            password_hash=_hash_password("Admin1234!"),
+            role="admin",
+            tenant_id="default",
+        )
+        db.add(admin)
+        await db.commit()
+        logger.info("Created default admin user: admin@finspark.dev / Admin1234!")

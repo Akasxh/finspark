@@ -15,6 +15,7 @@ from finspark.api.routes import (
     adapters,
     analytics,
     audit,
+    auth,
     configurations,
     documents,
     health,
@@ -31,7 +32,7 @@ from finspark.core.middleware import (
     TenantMiddleware,
 )
 from finspark.core.rate_limiter import RateLimiterMiddleware, metrics
-from finspark.seeds import seed_adapters
+from finspark.seeds import seed_adapters, seed_admin_user
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         await _run_migrations()
     await seed_adapters()
+    await seed_admin_user()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
     from finspark.core import events
@@ -160,6 +162,7 @@ app.add_middleware(
 
 # Routes
 app.include_router(health.router)
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(documents.router, prefix="/api/v1")
 app.include_router(adapters.router, prefix="/api/v1")
 app.include_router(configurations.router, prefix="/api/v1")

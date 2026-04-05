@@ -1,8 +1,10 @@
+import { clearTokens, getUser } from "@/lib/auth";
 import clsx from "clsx";
 import {
   FileText,
   FlaskConical,
   LayoutDashboard,
+  LogOut,
   Menu,
   Plug,
   Search,
@@ -13,7 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 const navGroups = [
   {
@@ -43,9 +45,19 @@ const navGroups = [
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navigate = useNavigate();
+  const user = getUser();
+
+  function handleLogout() {
+    clearTokens();
+    navigate("/login");
+  }
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "var(--color-bg-base)" }}>
+    <div
+      className="flex h-screen overflow-hidden"
+      style={{ backgroundColor: "var(--color-bg-base)" }}
+    >
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -82,7 +94,10 @@ export default function Layout() {
           >
             <Zap className="h-3.5 w-3.5 text-white" />
           </div>
-          <span className="text-sm font-bold tracking-tight" style={{ color: "var(--color-text-primary)" }}>
+          <span
+            className="text-sm font-bold tracking-tight"
+            style={{ color: "var(--color-text-primary)" }}
+          >
             AdaptConfig
           </span>
           <button
@@ -110,9 +125,7 @@ export default function Layout() {
                     className={({ isActive }) =>
                       clsx(
                         "flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] font-medium transition-colors",
-                        isActive
-                          ? "nav-active"
-                          : "nav-inactive"
+                        isActive ? "nav-active" : "nav-inactive"
                       )
                     }
                     style={({ isActive }) =>
@@ -137,13 +150,43 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* Footer */}
-        <div className="px-5 py-3" style={{ borderTop: "1px solid var(--color-border)" }}>
-          <p className="text-[10px] font-medium" style={{ color: "var(--color-text-muted)" }}>
+        {/* Footer — user info + logout */}
+        <div className="px-4 py-3 space-y-2" style={{ borderTop: "1px solid var(--color-border)" }}>
+          {user && (
+            <div className="flex items-center gap-2 min-w-0">
+              <div
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                style={{
+                  backgroundColor: "var(--color-brand-subtle)",
+                  color: "var(--color-brand-light)",
+                }}
+              >
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p
+                  className="text-[11px] font-semibold truncate"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  {user.name}
+                </p>
+                <p className="text-[10px] truncate" style={{ color: "var(--color-text-muted)" }}>
+                  {user.email}
+                </p>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-[7px] text-[12px] font-medium transition-colors hover:bg-white/5"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            Sign out
+          </button>
+          <p className="text-[10px]" style={{ color: "var(--color-text-muted)", opacity: 0.5 }}>
             AdaptConfig v0.1.0
-          </p>
-          <p className="text-[10px]" style={{ color: "var(--color-text-muted)", opacity: 0.6 }}>
-            AI-Powered Integration Configuration Platform
           </p>
         </div>
       </aside>
@@ -169,8 +212,14 @@ export default function Layout() {
           <div className="flex-1" />
           <div className="flex items-center gap-2">
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" style={{ backgroundColor: "var(--color-teal)" }} />
-              <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: "var(--color-teal)" }} />
+              <span
+                className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                style={{ backgroundColor: "var(--color-teal)" }}
+              />
+              <span
+                className="relative inline-flex h-2 w-2 rounded-full"
+                style={{ backgroundColor: "var(--color-teal)" }}
+              />
             </span>
             <span className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>
               System Healthy

@@ -22,7 +22,16 @@ DEFAULT_TENANT_NAME = "Default Tenant"
 
 # Paths that bypass authentication entirely
 _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
-    ["/health", "/docs", "/redoc", "/openapi.json", "/metrics"]
+    [
+        "/health",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/metrics",
+        "/api/v1/auth/register",
+        "/api/v1/auth/login",
+        "/api/v1/auth/refresh",
+    ]
 )
 
 
@@ -76,6 +85,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
             tenant_id = payload.get("tenant_id", DEFAULT_TENANT_ID)
             tenant_name = payload.get("tenant_name", DEFAULT_TENANT_NAME)
             role = payload.get("role", "viewer")
+            # Also expose email and user_id on request state
+            request.state.user_id = payload.get("sub", "")
+            request.state.email = payload.get("email", "")
 
         request.state.tenant_id = tenant_id
         request.state.tenant_name = tenant_name
