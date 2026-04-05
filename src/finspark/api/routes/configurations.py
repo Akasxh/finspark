@@ -53,7 +53,7 @@ from finspark.services.config_engine.diff_engine import ConfigDiffEngine
 from finspark.services.config_engine.field_mapper import ConfigGenerator
 from finspark.services.config_engine.rollback import RollbackManager
 from finspark.services.lifecycle import IntegrationLifecycle, InvalidTransitionError
-from finspark.services.llm.client import GeminiAPIError, GeminiClient
+from finspark.services.llm.client import GeminiAPIError, GeminiClient, get_llm_client
 from finspark.services.llm.config_generator import generate_config_llm
 from finspark.services.simulation.simulator import IntegrationSimulator
 
@@ -521,7 +521,7 @@ async def generate_configuration(
 
     if use_llm:
         try:
-            llm_client = GeminiClient()
+            llm_client = get_llm_client()
             adapter_info = {
                 "name": av_dict["adapter_name"],
                 "version": av_dict["version"],
