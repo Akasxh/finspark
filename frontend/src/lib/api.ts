@@ -260,6 +260,10 @@ export const configurationsApi = {
       .then((r) => r.data),
   update: (id: string, data: { name?: string; field_mappings?: FieldMapping[]; notes?: string }) =>
     api.patch<APIResponse<Configuration>>(`/api/v1/configurations/${id}`, data).then((r) => r.data),
+  delete: (id: string) =>
+    api
+      .delete<APIResponse<{ id: string; deleted: boolean }>>(`/api/v1/configurations/${id}`)
+      .then((r) => r.data),
 };
 
 export const simulationsApi = {
@@ -268,6 +272,10 @@ export const simulationsApi = {
     api.post<APIResponse<Simulation>>("/api/v1/simulations/run", params).then((r) => r.data),
   get: (id: string) =>
     api.get<APIResponse<Simulation>>(`/api/v1/simulations/${id}`).then((r) => r.data),
+  delete: (id: string) =>
+    api
+      .delete<APIResponse<{ id: string; deleted: boolean }>>(`/api/v1/simulations/${id}`)
+      .then((r) => r.data),
 };
 
 export interface AuditListFilters {

@@ -30,6 +30,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -1116,6 +1117,7 @@ export default function Configurations() {
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showCompare, setShowCompare] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<Configuration | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["configurations"],
@@ -1160,6 +1162,19 @@ export default function Configurations() {
       }
     },
     onError: () => { toast("Transition failed.", "error"); },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => configurationsApi.delete(id),
+    onSuccess: () => {
+      setConfirmDelete(null);
+      queryClient.invalidateQueries({ queryKey: ["configurations"] });
+      toast("Configuration deleted.", "success");
+    },
+    onError: () => {
+      toast("Failed to delete configuration.", "error");
+      setConfirmDelete(null);
+    },
   });
 
   const batchValidateMutation = useMutation({
@@ -1288,31 +1303,38 @@ export default function Configurations() {
                     </div>
                   </div>
 
-                  {/* Lifecycle transition buttons */}
-                  {transitions.length > 0 && (
-                    <div style={{ display: "flex", gap: 8 }} onClick={(e) => e.stopPropagation()}>
-                      {transitions.map((t) => {
-                        const TIcon = t.icon;
-                        return (
-                          <button
-                            key={t.targetState}
-                            type="button"
-                            className="btn-secondary"
-                            style={{ fontSize: 11, padding: "5px 10px" }}
-                            disabled={transitionMutation.isPending}
-                            onClick={() => {
-                              if (t.targetState === "active" && !window.confirm(`Deploy "${cfg.name}" to production?`)) return;
-                              setLastSimResult(null);
-                              transitionMutation.mutate({ id: cfg.id, targetState: t.targetState });
-                            }}
-                          >
-                            <TIcon style={{ width: 12, height: 12 }} />
-                            {t.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  {/* Lifecycle transition buttons + delete */}
+                  <div style={{ display: "flex", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+                    {transitions.map((t) => {
+                      const TIcon = t.icon;
+                      return (
+                        <button
+                          key={t.targetState}
+                          type="button"
+                          className="btn-secondary"
+                          style={{ fontSize: 11, padding: "5px 10px" }}
+                          disabled={transitionMutation.isPending}
+                          onClick={() => {
+                            if (t.targetState === "active" && !window.confirm(`Deploy "${cfg.name}" to production?`)) return;
+                            setLastSimResult(null);
+                            transitionMutation.mutate({ id: cfg.id, targetState: t.targetState });
+                          }}
+                        >
+                          <TIcon style={{ width: 12, height: 12 }} />
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ fontSize: 11, padding: "5px 8px", color: "var(--color-error-text)" }}
+                      onClick={() => setConfirmDelete(cfg)}
+                      aria-label={`Delete ${cfg.name}`}
+                    >
+                      <Trash2 style={{ width: 12, height: 12 }} />
+                    </button>
+                  </div>
 
                   <ChevronDown style={{
                     width: 15, height: 15, color: "var(--color-text-muted)", flexShrink: 0,
@@ -1356,6 +1378,45 @@ export default function Configurations() {
           })
         )}
       </div>
+
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 50,
+            background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setConfirmDelete(null); }}
+        >
+          <div className="card" style={{ padding: 24, maxWidth: 420, width: "90%" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-primary)", marginBottom: 8 }}>
+              Delete configuration?
+            </h3>
+            <p style={{ fontSize: 13, color: "var(--color-text-secondary)", marginBottom: 16 }}>
+              <span className="mono" style={{ color: "var(--color-text-primary)" }}>{confirmDelete.name}</span>{" "}
+              and its version history will be permanently deleted.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn-secondary" onClick={() => setConfirmDelete(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ background: deleteMutation.isPending ? undefined : "rgba(220,38,38,0.12)", borderColor: "rgba(220,38,38,0.3)", color: "var(--color-error-text)" }}
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(confirmDelete.id)}
+              >
+                {deleteMutation.isPending ? (
+                  <Loader2 style={{ width: 13, height: 13, animation: "spin 1s linear infinite" }} />
+                ) : (
+                  <><Trash2 style={{ width: 13, height: 13 }} /> Delete</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
