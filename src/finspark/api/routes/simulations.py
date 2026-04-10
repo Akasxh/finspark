@@ -208,6 +208,41 @@ async def get_simulation(
     )
 
 
+@router.delete("/{simulation_id}", response_model=APIResponse[dict])
+async def delete_simulation(
+    simulation_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = require_role("admin", "editor"),
+    audit: AuditService = Depends(get_audit_service),
+) -> APIResponse[dict]:
+    """Delete a simulation and its steps."""
+    stmt = select(Simulation).where(
+        Simulation.id == simulation_id,
+        Simulation.tenant_id == tenant.tenant_id,
+    )
+    result = await db.execute(stmt)
+    sim = result.scalar_one_or_none()
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
+    await db.delete(sim)
+    await db.flush()
+
+    await audit.log(
+        tenant_id=tenant.tenant_id,
+        actor=tenant.tenant_name,
+        action="delete_simulation",
+        resource_type="simulation",
+        resource_id=simulation_id,
+        details={},
+    )
+
+    return APIResponse(
+        data={"id": simulation_id, "deleted": True},
+        message="Simulation deleted",
+    )
+
+
 def _serialize_step(step: SimulationStep) -> dict:
     """Serialize a SimulationStep ORM row to a dict matching SimulationStepResult."""
     return {

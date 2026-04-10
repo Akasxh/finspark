@@ -918,3 +918,39 @@ async def list_configurations(
             for c in configs
         ],
     )
+
+
+@router.delete("/{config_id}", response_model=APIResponse[dict])
+async def delete_configuration(
+    config_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = require_role("admin", "editor"),
+    audit: AuditService = Depends(get_audit_service),
+) -> APIResponse[dict]:
+    """Delete a configuration and its history."""
+    stmt = select(Configuration).where(
+        Configuration.id == config_id,
+        Configuration.tenant_id == tenant.tenant_id,
+    )
+    result = await db.execute(stmt)
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuration not found")
+
+    config_name = config.name
+    await db.delete(config)
+    await db.flush()
+
+    await audit.log(
+        tenant_id=tenant.tenant_id,
+        actor=tenant.tenant_name,
+        action="delete_configuration",
+        resource_type="configuration",
+        resource_id=config_id,
+        details={"name": config_name},
+    )
+
+    return APIResponse(
+        data={"id": config_id, "deleted": True},
+        message=f"Configuration '{config_name}' deleted",
+    )
