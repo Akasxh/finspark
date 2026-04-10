@@ -73,6 +73,18 @@ class AnalyticsService:
         total = sum(by_status.values())
         passed = by_status.get("passed", 0)
 
+        # Calculate step-level pass rate (avg of passed_tests/total_tests)
+        stmt_pass_rate = select(
+            func.avg(
+                Simulation.passed_tests * 100.0 / func.nullif(Simulation.total_tests, 0)
+            )
+        ).where(
+            Simulation.tenant_id == self.tenant_id,
+            Simulation.total_tests > 0,
+        )
+        pass_rate_result = await self.db.execute(stmt_pass_rate)
+        avg_pass_rate = pass_rate_result.scalar() or 0.0
+
         stmt_avg = select(func.avg(Simulation.duration_ms)).where(
             Simulation.tenant_id == self.tenant_id,
             Simulation.duration_ms.isnot(None),
@@ -84,7 +96,7 @@ class AnalyticsService:
             "total": total,
             "passed": passed,
             "failed": by_status.get("failed", 0),
-            "pass_rate": round(passed / total, 2) if total > 0 else 0.0,
+            "pass_rate": round(avg_pass_rate / 100, 2) if total > 0 else 0.0,
             "avg_duration_ms": round(avg_duration, 0),
         }
 

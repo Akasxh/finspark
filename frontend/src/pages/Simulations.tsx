@@ -369,8 +369,14 @@ export default function Simulations() {
   const sims: Simulation[] = simsData?.data ?? [];
 
   const totalSims = sims.length;
-  const passedSims = sims.filter((s) => s.status === "passed").length;
-  const passRate = totalSims > 0 ? Math.round((passedSims / totalSims) * 100) : null;
+  const simsWithTests = sims.filter((s) => s.total_tests > 0);
+  const passRate =
+    simsWithTests.length > 0
+      ? Math.round(
+          simsWithTests.reduce((acc, s) => acc + (s.passed_tests / s.total_tests) * 100, 0) /
+            simsWithTests.length,
+        )
+      : null;
   const avgDuration =
     sims.length > 0
       ? Math.round(sims.reduce((acc, s) => acc + (s.duration_ms ?? 0), 0) / sims.length)
