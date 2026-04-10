@@ -2,11 +2,15 @@
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
 from finspark.schemas.simulations import SimulationStepResult
+from finspark.services.llm.client import GeminiAPIError, GeminiClient
+
+logger = logging.getLogger(__name__)
 
 
 class MockAPIServer:
@@ -277,6 +281,140 @@ class IntegrationSimulator:
         )
 
         return steps
+
+    async def validate_config_llm(
+        self,
+        config: dict[str, Any],
+        client: GeminiClient,
+    ) -> list[SimulationStepResult]:
+        """Validate an integration config using Gemini LLM for intelligent analysis.
+
+        Sends the full config to Gemini and asks it to analyze quality across
+        several dimensions. Falls back to rule-based run_simulation() on any error.
+        """
+        system_instruction = (
+            "You are an expert integration engineer specializing in Indian fintech APIs. "
+            "Analyze integration configuration objects and return structured JSON validation results. "
+            "Be specific and actionable in your analysis field."
+        )
+
+        prompt = f"""Analyze this integration configuration and return a JSON object with structured validation results.
+
+Configuration to analyze:
+```json
+{json.dumps(config, indent=2)}
+```
+
+Evaluate the following dimensions and return **only** valid JSON matching this exact schema:
+
+{{
+  "steps": [
+    {{
+      "step_name": "config_structure_validation",
+      "status": "passed" | "failed",
+      "confidence_score": <float 0.0–1.0>,
+      "analysis": "<detailed explanation of findings>",
+      "actual_response": {{<relevant details as key-value pairs>}}
+    }},
+    {{
+      "step_name": "field_mapping_quality",
+      "status": "passed" | "failed",
+      "confidence_score": <float 0.0–1.0>,
+      "analysis": "<are all critical fields mapped? semantic correctness?>",
+      "actual_response": {{<relevant details>}}
+    }},
+    {{
+      "step_name": "auth_configuration_adequacy",
+      "status": "passed" | "failed",
+      "confidence_score": <float 0.0–1.0>,
+      "analysis": "<is auth config appropriate for the adapter type?>",
+      "actual_response": {{<relevant details>}}
+    }},
+    {{
+      "step_name": "error_handling_robustness",
+      "status": "passed" | "failed",
+      "confidence_score": <float 0.0–1.0>,
+      "analysis": "<hooks, on_error handlers, fallback strategies>",
+      "actual_response": {{<relevant details>}}
+    }},
+    {{
+      "step_name": "retry_logic_appropriateness",
+      "status": "passed" | "failed",
+      "confidence_score": <float 0.0–1.0>,
+      "analysis": "<retry count, backoff strategy, status code coverage>",
+      "actual_response": {{<relevant details>}}
+    }},
+    {{
+      "step_name": "endpoint_configuration_validity",
+      "status": "passed" | "failed",
+      "confidence_score": <float 0.0–1.0>,
+      "analysis": "<paths, methods, required/optional params, base_url format>",
+      "actual_response": {{<relevant details>}}
+    }},
+    {{
+      "step_name": "security_best_practices",
+      "status": "passed" | "failed",
+      "confidence_score": <float 0.0–1.0>,
+      "analysis": "<credential handling, token expiry, TLS, sensitive field exposure>",
+      "actual_response": {{<relevant details>}}
+    }}
+  ],
+  "overall_assessment": "<2-3 sentence summary of config quality and top recommendations>"
+}}
+
+Return only the JSON object. No markdown, no prose outside the JSON."""
+
+        start = time.monotonic()
+        try:
+            data = await client.generate_json(
+                prompt,
+                system_instruction=system_instruction,
+                temperature=0.1,
+                max_tokens=4096,
+            )
+        except (GeminiAPIError, Exception) as exc:
+            logger.warning(
+                "validate_config_llm_fallback reason=%s adapter=%s",
+                exc,
+                config.get("adapter_name", "unknown"),
+            )
+            return self.run_simulation(config)
+
+        raw_steps: list[dict[str, Any]] = data.get("steps", [])
+        if not raw_steps:
+            logger.warning("validate_config_llm_empty_steps falling back to rule-based")
+            return self.run_simulation(config)
+
+        total_duration_ms = int((time.monotonic() - start) * 1000)
+        per_step_ms = max(1, total_duration_ms // len(raw_steps))
+
+        results: list[SimulationStepResult] = []
+        for step in raw_steps:
+            status = step.get("status", "error")
+            if status not in {"passed", "failed", "skipped", "error"}:
+                status = "error"
+
+            actual = step.get("actual_response", {})
+            analysis = step.get("analysis", "")
+            if analysis and isinstance(actual, dict):
+                actual = {"analysis": analysis, **actual}
+
+            results.append(
+                SimulationStepResult(
+                    step_name=step.get("step_name", "llm_validation_step"),
+                    status=status,
+                    request_payload={"config_keys": list(config.keys())},
+                    expected_response={"status": "passed"},
+                    actual_response=actual,
+                    duration_ms=per_step_ms,
+                    confidence_score=float(step.get("confidence_score", 0.0)),
+                    error_message=(
+                        analysis if status in {"failed", "error"} and analysis else None
+                    ),
+                )
+            )
+
+        return results
 
     def _test_config_structure(self, config: dict[str, Any]) -> SimulationStepResult:
         """Validate the overall configuration structure."""

@@ -1,12 +1,16 @@
 """Field mapping engine - intelligently maps source fields to target adapter fields."""
 
 import json
+import logging
 import re
 from typing import Any
 
 from rapidfuzz import fuzz, process
 
 from finspark.schemas.configurations import FieldMapping
+from finspark.services.llm.client import GeminiAPIError, GeminiClient
+
+logger = logging.getLogger(__name__)
 
 # Domain-specific field synonyms for Indian fintech
 FIELD_SYNONYMS: dict[str, list[str]] = {
@@ -133,6 +137,98 @@ class FieldMapper:
             return (best_target, best_score)
 
         return None
+
+    async def map_fields_llm(
+        self,
+        source_fields: list[dict[str, str]],
+        target_fields: list[dict[str, str]],
+        client: GeminiClient,
+    ) -> list[FieldMapping]:
+        """Map source fields to target fields using Gemini LLM for semantic matching.
+
+        Falls back to rule-based ``map_fields()`` on any error.
+        """
+        source_names = [f.get("name", "") for f in source_fields]
+        target_names = [f.get("name", "") for f in target_fields]
+
+        # Build synonym context string for the prompt
+        synonym_examples = "; ".join(
+            f"{k} ↔ {', '.join(v[:3])}" for k, v in list(FIELD_SYNONYMS.items())[:8]
+        )
+
+        prompt = (
+            "You are an expert at mapping API fields for Indian fintech integrations.\n"
+            f"Given these source fields from a document: {source_names}\n"
+            f"And these target fields from an adapter schema: {target_names}\n"
+            "Map each source field to the best matching target field. Consider:\n"
+            "- Semantic meaning (pan_number ↔ permanent_account_number)\n"
+            "- Indian fintech domain knowledge (CIBIL, eKYC, GST, UPI, Aadhaar, PAN)\n"
+            "- Data type compatibility\n"
+            f"- Known synonyms: {synonym_examples}\n"
+            "Rules:\n"
+            "- Every source field must appear exactly once in the output.\n"
+            "- If no good match exists for a source field, set target to empty string and confidence to 0.0.\n"
+            "- Do not assign the same target to more than one source field.\n"
+            'Return ONLY valid JSON: {"mappings": [{"source": "...", "target": "...", '
+            '"confidence": 0.0-1.0, '
+            '"transformation": "none|upper|lower|parse_number|parse_date|normalize_phone|validate_email|to_string|format_date|parse_boolean", '
+            '"reason": "..."}]}'
+        )
+
+        try:
+            data = await client.generate_json(prompt, temperature=0.1)
+            raw_mappings: list[dict[str, Any]] = data.get("mappings", [])
+            if not raw_mappings:
+                raise GeminiAPIError("LLM returned empty mappings list")
+
+            used_targets: set[str] = set()
+            result: list[FieldMapping] = []
+
+            for item in raw_mappings:
+                source = item.get("source", "")
+                target = item.get("target", "")
+                confidence = float(item.get("confidence", 0.0))
+                transformation_raw = item.get("transformation", "none")
+                transformation = None if transformation_raw in ("none", "", None) else transformation_raw
+
+                # Deduplicate target assignments
+                if target and target in used_targets:
+                    target = ""
+                    confidence = 0.0
+                    transformation = None
+                if target:
+                    used_targets.add(target)
+
+                result.append(
+                    FieldMapping(
+                        source_field=source,
+                        target_field=target,
+                        transformation=transformation,
+                        confidence=round(confidence, 2),
+                        is_confirmed=confidence > 0.9,
+                    )
+                )
+
+            # Ensure every source field is represented (LLM may omit some)
+            returned_sources = {m.source_field for m in result}
+            for sf in source_fields:
+                name = sf.get("name", "")
+                if name not in returned_sources:
+                    result.append(
+                        FieldMapping(
+                            source_field=name,
+                            target_field="",
+                            confidence=0.0,
+                            is_confirmed=False,
+                        )
+                    )
+
+            logger.info("llm_field_mapping mapped=%d sources=%d", len(result), len(source_fields))
+            return result
+
+        except (GeminiAPIError, KeyError, ValueError, TypeError) as exc:
+            logger.warning("llm_field_mapping_fallback error=%s", exc)
+            return self.map_fields(source_fields, target_fields)
 
     def _suggest_transformation(self, source_type: str, target_type: str) -> str | None:
         """Suggest a transformation rule based on type differences."""
@@ -334,6 +430,73 @@ class ConfigGenerator:
                 "order": 1,
             },
         ]
+
+    async def generate_with_llm(
+        self,
+        parsed_result: dict[str, Any],
+        adapter_version: dict[str, Any],
+        client: GeminiClient,
+    ) -> dict[str, Any]:
+        """Generate integration configuration using LLM-based field mapping.
+
+        Uses ``map_fields_llm`` for semantic matching; falls back to rule-based
+        ``generate()`` on error.
+        """
+        all_fields = parsed_result.get("fields", [])
+        request_fields = [
+            {"name": f.get("name", ""), "type": f.get("data_type", "string")}
+            for f in all_fields
+            if "request" in (f.get("source_section", "") or "").lower()
+        ]
+        if not request_fields:
+            request_fields = [
+                {"name": f.get("name", ""), "type": f.get("data_type", "string")}
+                for f in all_fields
+            ]
+
+        target_fields = self._extract_adapter_fields(adapter_version)
+        response_target_fields = self._extract_response_fields(adapter_version)
+
+        mappings = await self.field_mapper.map_fields_llm(request_fields, target_fields, client)
+
+        response_doc_fields = [
+            {"name": f.get("name", ""), "type": f.get("data_type", "string")}
+            for f in all_fields
+            if "response" in (f.get("source_section", "") or "").lower()
+        ]
+        if response_doc_fields and response_target_fields:
+            response_mappings = await self.field_mapper.map_fields_llm(
+                response_doc_fields, response_target_fields, client
+            )
+            mappings.extend(response_mappings)
+
+        config = {
+            "adapter_name": adapter_version.get("adapter_name", ""),
+            "version": adapter_version.get("version", "v1"),
+            "base_url": adapter_version.get("base_url", ""),
+            "auth": {
+                "type": adapter_version.get("auth_type", "api_key"),
+                "credentials": {},
+            },
+            "endpoints": self._build_endpoint_configs(adapter_version),
+            "field_mappings": [m.model_dump() for m in mappings],
+            "transformation_rules": self._generate_transformations(mappings),
+            "hooks": self._generate_default_hooks(),
+            "retry_policy": {
+                "max_retries": 3,
+                "backoff_factor": 2,
+                "retry_on_status": [429, 500, 502, 503],
+            },
+            "timeout_ms": 30000,
+            "metadata": {
+                "generated_from_document": True,
+                "llm_assisted": True,
+                "confidence_score": self._calculate_overall_confidence(mappings),
+                "unmapped_fields": [m.source_field for m in mappings if not m.target_field],
+            },
+        }
+
+        return config
 
     @staticmethod
     def _calculate_overall_confidence(mappings: list[FieldMapping]) -> float:

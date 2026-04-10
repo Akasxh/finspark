@@ -139,7 +139,8 @@ class TestSimulationStats:
         assert result["total"] == 3
         assert result["passed"] == 2
         assert result["failed"] == 1
-        assert result["pass_rate"] == round(2 / 3, 2)
+        # pass_rate is now avg of step-level pass rates: (100% + 100% + 40%) / 3 = 80%
+        assert result["pass_rate"] == 0.8
         assert result["avg_duration_ms"] == 200
 
 

@@ -1,5 +1,6 @@
 """Natural language search service for integrations."""
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,6 +12,9 @@ from sqlalchemy.orm import selectinload
 from finspark.models.adapter import Adapter
 from finspark.models.configuration import Configuration
 from finspark.models.simulation import Simulation
+from finspark.services.llm.client import GeminiAPIError, GeminiClient
+
+logger = logging.getLogger(__name__)
 
 # Keyword -> category/status mappings for NL resolution
 _CATEGORY_KEYWORDS: dict[str, str] = {
@@ -295,6 +299,202 @@ class IntegrationSearch:
                 )
 
         # Sort each group by score descending
+        response.adapters.sort(key=lambda r: r.score, reverse=True)
+        response.configurations.sort(key=lambda r: r.score, reverse=True)
+        response.simulations.sort(key=lambda r: r.score, reverse=True)
+        response.total = (
+            len(response.adapters) + len(response.configurations) + len(response.simulations)
+        )
+
+        return response
+
+    def _build_parsed_from_llm(self, query: str, llm_data: dict[str, Any]) -> _ParsedQuery:
+        """Construct a _ParsedQuery from the structured dict returned by the LLM."""
+        raw_tokens: list[Any] = llm_data.get("tokens", [])
+        tokens = [str(t).lower() for t in raw_tokens if isinstance(t, str)]
+
+        category = llm_data.get("category")
+        status = llm_data.get("status")
+        auth_type = llm_data.get("auth_type")
+        sim_status = llm_data.get("sim_status")
+
+        _valid_categories = {
+            "bureau", "kyc", "gst", "payment", "fraud", "notification", "open_banking"
+        }
+        _valid_statuses = {
+            "draft", "configured", "validating", "testing", "active", "deprecated", "rollback"
+        }
+        _valid_auth_types = {"api_key", "oauth2", "bearer", "basic", "jwt", "hmac"}
+        _valid_sim_statuses = {"passed", "failed", "error", "pending", "running"}
+
+        parsed = _ParsedQuery(raw=query.lower().strip(), tokens=tokens)
+
+        if isinstance(category, str) and category in _valid_categories:
+            parsed.categories = [category]
+        if isinstance(status, str) and status in _valid_statuses:
+            parsed.statuses = [status]
+        if isinstance(auth_type, str) and auth_type in _valid_auth_types:
+            parsed.auth_types = [auth_type]
+        if isinstance(sim_status, str) and sim_status in _valid_sim_statuses:
+            parsed.sim_statuses = [sim_status]
+
+        return parsed
+
+    async def search_with_llm(self, query: str, tenant_id: str, client: GeminiClient) -> SearchResponse:
+        """Search integrations using Gemini LLM for query understanding.
+
+        Sends the query to Gemini to extract structured filters (tokens, category,
+        status, auth_type, sim_status), then reuses the existing DB fetch + scoring
+        pipeline. Falls back to rule-based ``search()`` on any error.
+        """
+        system_instruction = (
+            "You are a search query parser for an Indian fintech integration platform. "
+            "Parse the user's search query into structured filters. "
+            "Available categories: bureau, kyc, gst, payment, fraud, notification, open_banking. "
+            "Available statuses: draft, configured, validating, testing, active, deprecated, rollback. "
+            "Available auth types: api_key, oauth2, bearer, basic, jwt, hmac. "
+            "Return only valid JSON with no extra commentary."
+        )
+        prompt_template = (
+            'Parse this search query into structured filters.\n\n'
+            'Query: "{query}"\n\n'
+            "Return JSON:\n"
+            "{{\n"
+            '  "tokens": ["search", "terms"],\n'
+            '  "category": "bureau" or null,\n'
+            '  "status": "active" or null,\n'
+            '  "auth_type": "oauth2" or null,\n'
+            '  "sim_status": "passed" or null,\n'
+            '  "intent": "search_adapters|search_configs|search_simulations|search_all"\n'
+            "}}"
+        )
+
+        try:
+            prompt = prompt_template.format(query=query)
+            llm_data = await client.generate_json(
+                prompt,
+                system_instruction=system_instruction,
+                temperature=0.1,
+            )
+        except GeminiAPIError as exc:
+            logger.warning("search_with_llm_gemini_error query=%r error=%s — falling back", query, exc)
+            return await self.search(query, tenant_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("search_with_llm_unexpected_error query=%r error=%s — falling back", query, exc)
+            return await self.search(query, tenant_id)
+
+        if not isinstance(llm_data, dict):
+            logger.warning(
+                "search_with_llm_bad_response query=%r type=%s — falling back",
+                query,
+                type(llm_data).__name__,
+            )
+            return await self.search(query, tenant_id)
+
+        try:
+            parsed = self._build_parsed_from_llm(query, llm_data)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("search_with_llm_parse_error query=%r error=%s — falling back", query, exc)
+            return await self.search(query, tenant_id)
+
+        # Reuse existing DB fetch + score pipeline with LLM-derived parsed query
+        response = SearchResponse(query=query)
+        terms = parsed.tokens
+
+        stmt = select(Adapter).options(selectinload(Adapter.versions))
+        if terms and not parsed.auth_types:
+            term_filter = or_(
+                *[Adapter.name.ilike(f"%{term}%") for term in terms],
+                *[Adapter.description.ilike(f"%{term}%") for term in terms],
+                *[Adapter.category.ilike(f"%{term}%") for term in terms],
+            )
+            stmt = stmt.where(term_filter)
+        if parsed.categories:
+            stmt = stmt.where(Adapter.category.in_(parsed.categories))
+        stmt = stmt.limit(50)
+        result = await self.db.execute(stmt)
+        adapters = list(result.scalars().all())
+
+        for adapter in adapters:
+            score = self._score_adapter(adapter, parsed)
+            if score > 0:
+                auth_types = list({v.auth_type for v in adapter.versions})
+                response.adapters.append(
+                    SearchResult(
+                        type="adapter",
+                        id=adapter.id,
+                        name=adapter.name,
+                        score=score,
+                        details={
+                            "category": adapter.category,
+                            "description": adapter.description,
+                            "is_active": adapter.is_active,
+                            "auth_types": auth_types,
+                        },
+                    )
+                )
+
+        stmt = select(Configuration).where(Configuration.tenant_id == tenant_id)
+        if terms:
+            term_filter = or_(
+                *[Configuration.name.ilike(f"%{term}%") for term in terms],
+                *[Configuration.status.ilike(f"%{term}%") for term in terms],
+            )
+            stmt = stmt.where(term_filter)
+        if parsed.statuses:
+            stmt = stmt.where(Configuration.status.in_(parsed.statuses))
+        stmt = stmt.limit(50)
+        result = await self.db.execute(stmt)
+        configurations = list(result.scalars().all())
+
+        for config in configurations:
+            score = self._score_configuration(config, parsed)
+            if score > 0:
+                response.configurations.append(
+                    SearchResult(
+                        type="configuration",
+                        id=config.id,
+                        name=config.name,
+                        score=score,
+                        details={
+                            "status": config.status,
+                            "version": config.version,
+                        },
+                    )
+                )
+
+        stmt = select(Simulation).where(Simulation.tenant_id == tenant_id)
+        if terms:
+            term_filter = or_(
+                *[Simulation.status.ilike(f"%{term}%") for term in terms],
+                *[Simulation.test_type.ilike(f"%{term}%") for term in terms],
+            )
+            stmt = stmt.where(term_filter)
+        if parsed.sim_statuses:
+            stmt = stmt.where(Simulation.status.in_(parsed.sim_statuses))
+        stmt = stmt.limit(50)
+        result = await self.db.execute(stmt)
+        simulations = list(result.scalars().all())
+
+        for sim in simulations:
+            score = self._score_simulation(sim, parsed)
+            if score > 0:
+                response.simulations.append(
+                    SearchResult(
+                        type="simulation",
+                        id=sim.id,
+                        name=f"Simulation {sim.id[:8]}",
+                        score=score,
+                        details={
+                            "status": sim.status,
+                            "test_type": sim.test_type,
+                            "total_tests": sim.total_tests,
+                            "passed_tests": sim.passed_tests,
+                            "failed_tests": sim.failed_tests,
+                        },
+                    )
+                )
+
         response.adapters.sort(key=lambda r: r.score, reverse=True)
         response.configurations.sort(key=lambda r: r.score, reverse=True)
         response.simulations.sort(key=lambda r: r.score, reverse=True)

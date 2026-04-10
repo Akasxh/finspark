@@ -47,15 +47,15 @@ async def _seed_minimal(db: AsyncSession) -> None:
 
     db.add(Simulation(
         id="asim-1", tenant_id=TENANT, configuration_id="acfg-1",
-        status="passed", duration_ms=100,
+        status="passed", duration_ms=100, total_tests=5, passed_tests=5, failed_tests=0,
     ))
     db.add(Simulation(
         id="asim-2", tenant_id=TENANT, configuration_id="acfg-1",
-        status="failed", duration_ms=200,
+        status="failed", duration_ms=200, total_tests=5, passed_tests=2, failed_tests=3,
     ))
     db.add(Simulation(
         id="asim-3", tenant_id=TENANT, configuration_id="acfg-1",
-        status="passed", duration_ms=300,
+        status="passed", duration_ms=300, total_tests=5, passed_tests=5, failed_tests=0,
     ))
 
     for i, rtype in enumerate(["document", "simulation", "document", "configuration"]):

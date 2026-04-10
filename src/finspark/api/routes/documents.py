@@ -1,6 +1,7 @@
 """Document upload and parsing routes."""
 
 import asyncio
+import logging
 from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
@@ -16,6 +17,8 @@ from finspark.api.dependencies import (
 from finspark.core import events
 from finspark.core.audit import AuditService
 from finspark.core.config import settings
+
+logger = logging.getLogger(__name__)
 from finspark.core.database import get_db
 from finspark.models.document import Document
 from finspark.schemas.common import APIResponse, DocType, TenantContext
@@ -100,29 +103,35 @@ async def upload_document(
     db.add(doc)
     await db.flush()
 
-    # Parse document — for BRD/SOW, try LLM after initial text extraction
+    # Parse document — try LLM first for all doc types, fallback to regex
     try:
-        result = await asyncio.to_thread(parser.parse, file_path, doc_type=doc_type)
+        use_llm = settings.ai_enabled and bool(settings.gemini_api_key)
 
-        # For BRD/SOW, try LLM-powered extraction for better accuracy
-        if doc_type in ("brd", "sow"):
+        file_ext = suffix.lstrip(".")
+        if file_ext in ("yaml", "yml", "json"):
+            raw_text = file_bytes.decode("utf-8", errors="replace")
+        else:
+            raw_text = ""
+
+        result = None
+        if use_llm:
             try:
-                from finspark.services.parsing.llm_parser import extract_entities_llm
+                from finspark.services.llm.client import get_llm_client
 
-                # Use decoded file bytes for text files, or parsed summary for binary
-                file_ext = suffix.lstrip(".")
-                if file_ext in ("yaml", "yml", "json"):
-                    raw_text_for_llm = file_bytes.decode("utf-8", errors="replace")
-                else:
-                    raw_text_for_llm = result.summary
+                llm_client = get_llm_client()
+                # Get raw text for binary docs via regex parser first
+                if not raw_text:
+                    regex_result = await asyncio.to_thread(parser.parse, file_path, doc_type=doc_type)
+                    raw_text = regex_result.summary
 
-                llm_parsed = await extract_entities_llm(raw_text_for_llm)
-                if llm_parsed:
-                    result = parser.build_result_from_llm(
-                        llm_parsed, doc_type, raw_text_for_llm
-                    )
+                result = await parser.parse_with_llm(raw_text, safe_name, llm_client)
+                logger.info("document_parsed_via_llm filename=%s", safe_name)
             except Exception:
-                pass  # Keep the regex-based result
+                logger.warning("LLM parsing failed for %s, falling back to regex", safe_name, exc_info=True)
+                result = None
+
+        if result is None:
+            result = await asyncio.to_thread(parser.parse, file_path, doc_type=doc_type)
 
         doc.parsed_result = result.model_dump_json()
         doc.raw_text = result.summary[:5000]

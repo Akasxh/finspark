@@ -9,11 +9,16 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
+
 from finspark.api.dependencies import get_audit_service, get_simulator, get_tenant_context, require_role
 from finspark.core import events
+from finspark.core.config import settings
 from finspark.core.json_utils import safe_json_loads
 from finspark.core.audit import AuditService
 from finspark.core.database import async_session_factory, get_db
+
+logger = logging.getLogger(__name__)
 from finspark.models.configuration import Configuration
 from finspark.models.simulation import Simulation, SimulationStep
 from finspark.schemas.common import APIResponse, TenantContext
@@ -98,8 +103,19 @@ async def run_simulation(
     db.add(simulation)
     await db.flush()
 
-    # Run simulation
-    steps = await asyncio.to_thread(simulator.run_simulation, full_config, test_type=request.test_type)
+    # Run simulation — use LLM-powered validation when AI is enabled
+    use_llm = settings.ai_enabled and bool(settings.gemini_api_key)
+    if use_llm:
+        try:
+            from finspark.services.llm.client import get_llm_client
+
+            llm_client = get_llm_client()
+            steps = await simulator.validate_config_llm(full_config, llm_client)
+        except Exception:
+            logger.warning("LLM simulation failed, falling back to rule-based", exc_info=True)
+            steps = await asyncio.to_thread(simulator.run_simulation, full_config, test_type=request.test_type)
+    else:
+        steps = await asyncio.to_thread(simulator.run_simulation, full_config, test_type=request.test_type)
 
     # Save results
     total = len(steps)

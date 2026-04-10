@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import BackgroundTasks
+
 import pytest
 
 from finspark.api.routes.configurations import _augment_with_rule_based
@@ -268,6 +270,7 @@ class TestGenerateConfigurationPipeline:
 
             result = await generate_configuration(
                 request=request,
+                background_tasks=BackgroundTasks(),
                 db=self._make_mock_db(self._make_mock_doc(), self._make_mock_av()),
                 tenant=self._make_mock_tenant(),
                 generator=ConfigGenerator(),
@@ -308,6 +311,7 @@ class TestGenerateConfigurationPipeline:
 
             result = await generate_configuration(
                 request=request,
+                background_tasks=BackgroundTasks(),
                 db=self._make_mock_db(self._make_mock_doc(), self._make_mock_av()),
                 tenant=self._make_mock_tenant(),
                 generator=ConfigGenerator(),
@@ -346,6 +350,7 @@ class TestGenerateConfigurationPipeline:
 
             result = await generate_configuration(
                 request=request,
+                background_tasks=BackgroundTasks(),
                 db=self._make_mock_db(self._make_mock_doc(), self._make_mock_av()),
                 tenant=self._make_mock_tenant(),
                 generator=ConfigGenerator(),
@@ -384,6 +389,7 @@ class TestGenerateConfigurationPipeline:
 
             result = await generate_configuration(
                 request=request,
+                background_tasks=BackgroundTasks(),
                 db=self._make_mock_db(self._make_mock_doc(), self._make_mock_av()),
                 tenant=self._make_mock_tenant(),
                 generator=ConfigGenerator(),
@@ -410,6 +416,7 @@ class TestGenerateConfigurationPipeline:
 
             result = await generate_configuration(
                 request=request,
+                background_tasks=BackgroundTasks(),
                 db=self._make_mock_db(self._make_mock_doc(), self._make_mock_av()),
                 tenant=self._make_mock_tenant(),
                 generator=ConfigGenerator(),
@@ -451,6 +458,7 @@ class TestGenerateConfigurationPipeline:
 
             await generate_configuration(
                 request=request,
+                background_tasks=BackgroundTasks(),
                 db=db,
                 tenant=self._make_mock_tenant(),
                 generator=ConfigGenerator(),
@@ -480,6 +488,7 @@ class TestGenerateConfigurationPipeline:
 
             await generate_configuration(
                 request=request,
+                background_tasks=BackgroundTasks(),
                 db=self._make_mock_db(self._make_mock_doc(), self._make_mock_av()),
                 tenant=self._make_mock_tenant(),
                 generator=ConfigGenerator(),

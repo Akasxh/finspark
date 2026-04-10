@@ -1,6 +1,7 @@
 """Document parsing service - extracts structured data from BRDs, SOWs, API specs."""
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,9 @@ from finspark.schemas.documents import (
     ExtractedField,
     ParsedDocumentResult,
 )
+from finspark.services.llm.client import GeminiAPIError, GeminiClient
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentParser:
@@ -157,6 +161,165 @@ class DocumentParser:
             confidence_score=round(confidence, 2),
             raw_entities=self._extract_all_entities(original_text),
         )
+
+    async def parse_with_llm(
+        self, text: str, filename: str, client: GeminiClient
+    ) -> ParsedDocumentResult:
+        """Extract structured data from document text using Gemini as the primary path.
+
+        Falls back to the regex-based ``parse_text()`` on any error.
+        """
+        _SYSTEM_INSTRUCTION = (
+            "You are an expert at extracting structured integration requirements from "
+            "enterprise documents (BRDs, SOWs, API specs, technical specifications) "
+            "for Indian financial services. Extract every API endpoint, field definition, "
+            "authentication requirement, and service identifier present in the document."
+        )
+        _PROMPT = """Analyze the following document and extract ALL structured information.
+
+Document filename: {filename}
+Document text:
+---
+{text}
+---
+
+Return a JSON object with exactly these keys:
+{{
+  "doc_type": "brd",
+  "title": "Document title or best guess from content",
+  "summary": "One paragraph summary of the document purpose",
+  "services_identified": ["List of external service/API/provider names mentioned"],
+  "endpoints": [
+    {{"path": "/api/path", "method": "POST", "description": "What this endpoint does", "is_mandatory": true}}
+  ],
+  "fields": [
+    {{"name": "field_name", "data_type": "string", "is_required": true, "source_section": "section name where field appears", "description": "field description", "sample_value": ""}}
+  ],
+  "auth_requirements": [
+    {{"auth_type": "api_key", "details": {{"description": "How authentication works"}}}}
+  ],
+  "security_requirements": ["List of security requirements as plain strings"],
+  "sla_requirements": {{"response_time": "200ms", "availability": "99.9%"}},
+  "sections": {{"section_name": "brief content or heading"}}
+}}
+
+Rules:
+- doc_type must be one of: brd, sow, api_spec, technical_spec, other
+- Infer doc_type from the filename and content
+- Focus on Indian fintech terms: CIBIL, PAN, Aadhaar, GSTIN, UPI, NEFT, IMPS, eKYC, mTLS, etc.
+- Include ALL endpoints and fields explicitly mentioned or strongly implied
+- sla_requirements values must be strings (e.g. "200ms", "99.9%"); omit keys not found
+- Return ONLY valid JSON, no markdown fences"""
+
+        truncated = text[:15000]
+        doc_type = self._normalize_doc_type("brd")
+
+        try:
+            prompt = _PROMPT.format(filename=filename, text=truncated)
+            llm_data: dict[str, Any] = await client.generate_json(
+                prompt,
+                system_instruction=_SYSTEM_INSTRUCTION,
+                temperature=0.1,
+                max_tokens=8192,
+            )
+
+            inferred_type = self._normalize_doc_type(llm_data.get("doc_type", "brd"))
+
+            endpoints = [
+                ExtractedEndpoint(
+                    path=ep.get("path", ""),
+                    method=ep.get("method", "GET"),
+                    description=ep.get("description", ""),
+                    parameters=[],
+                    is_mandatory=ep.get("is_mandatory", True),
+                )
+                for ep in llm_data.get("endpoints", [])
+                if ep.get("path")
+            ]
+
+            fields = [
+                ExtractedField(
+                    name=f.get("name", ""),
+                    data_type=f.get("data_type", "string"),
+                    description=f.get("description", ""),
+                    is_required=f.get("is_required", False),
+                    sample_value=str(f.get("sample_value", "")),
+                    source_section=f.get("source_section", ""),
+                )
+                for f in llm_data.get("fields", [])
+                if f.get("name")
+            ]
+
+            # Augment with regex-detected endpoints the LLM may have missed
+            llm_endpoint_paths = {ep.path for ep in endpoints}
+            for re_ep in self._extract_endpoints(text):
+                if re_ep.path not in llm_endpoint_paths:
+                    endpoints.append(re_ep)
+
+            # Augment with regex fields the LLM may have missed
+            llm_field_names = {f.name for f in fields}
+            for rf in self._extract_fields(text):
+                if rf.name not in llm_field_names:
+                    fields.append(rf)
+
+            auth = [
+                ExtractedAuth(
+                    auth_type=a.get("auth_type", "api_key"),
+                    details=a.get("details", {}),
+                )
+                for a in llm_data.get("auth_requirements", [])
+            ]
+
+            sla_raw = llm_data.get("sla_requirements", {})
+            sla: dict[str, str] = (
+                {k: str(v) for k, v in sla_raw.items() if v}
+                if isinstance(sla_raw, dict)
+                else {}
+            )
+
+            sections_raw = llm_data.get("sections", {})
+            sections: dict[str, str] = (
+                {k: str(v) for k, v in sections_raw.items()}
+                if isinstance(sections_raw, dict)
+                else self._extract_sections(text)
+            )
+
+            total_entities = (
+                len(endpoints)
+                + len(fields)
+                + len(auth)
+                + len(llm_data.get("services_identified", []))
+            )
+            confidence = min(1.0, max(0.7, total_entities / 20.0))
+
+            logger.info(
+                "parse_with_llm_succeeded filename=%s entities=%d",
+                filename,
+                total_entities,
+            )
+
+            return ParsedDocumentResult(
+                doc_type=inferred_type,
+                title=llm_data.get("title", self._extract_title(text)),
+                summary=llm_data.get("summary", self._extract_summary(text)),
+                services_identified=llm_data.get("services_identified", []),
+                endpoints=endpoints,
+                fields=fields,
+                auth_requirements=auth,
+                security_requirements=llm_data.get("security_requirements", []),
+                sla_requirements=sla,
+                sections=sections,
+                confidence_score=round(confidence, 2),
+                raw_entities=self._extract_all_entities(text),
+            )
+
+        except (GeminiAPIError, Exception) as exc:
+            logger.warning(
+                "parse_with_llm_failed filename=%s error=%s — falling back to regex",
+                filename,
+                exc,
+            )
+            return self.parse_text(text, doc_type=doc_type)
 
     def _parse_docx(self, file_path: Path, doc_type: str = "brd") -> ParsedDocumentResult:
         from docx import Document

@@ -158,10 +158,10 @@ class TestFullWorkflow:
         assert sim_data["passed_tests"] > 0
         assert sim_data["duration_ms"] >= 0
 
-        # Verify individual steps ran
+        # Verify individual steps ran (step names vary between rule-based and LLM)
         step_names = [s["step_name"] for s in sim_data["steps"]]
-        assert "config_structure_validation" in step_names
-        assert "field_mapping_validation" in step_names
+        assert any("config" in s and "struct" in s for s in step_names), f"No config structure step in {step_names}"
+        assert any("field" in s and "map" in s for s in step_names), f"No field mapping step in {step_names}"
 
         # Step 7: Verify simulation is retrievable
         sim_id = sim_data["id"]
