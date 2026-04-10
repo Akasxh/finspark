@@ -1,7 +1,7 @@
 import { configurationsApi, simulationsApi } from "@/lib/api";
 import type { Configuration, Simulation, SimulationStepResult } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, BarChart3, ChevronDown, FlaskConical, Loader2, Play, Zap } from "lucide-react";
+import { AlertCircle, BarChart3, ChevronDown, FlaskConical, Loader2, Play, Trash2, Zap } from "lucide-react";
 import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -196,7 +196,7 @@ function StepRow({ step }: { step: SimulationStepResult }) {
   );
 }
 
-function SimRow({ sim, configName }: { sim: Simulation; configName?: string }) {
+function SimRow({ sim, configName, onDelete }: { sim: Simulation; configName?: string; onDelete?: () => void }) {
   const [open, setOpen] = useState(false);
   const passed = sim.status === "passed";
   const successPct = sim.total_tests > 0 ? Math.round((sim.passed_tests / sim.total_tests) * 100) : 0;
@@ -215,7 +215,7 @@ function SimRow({ sim, configName }: { sim: Simulation; configName?: string }) {
         onClick={() => setOpen(!open)}
         style={{
           display: "grid",
-          gridTemplateColumns: "auto 1fr auto auto auto auto auto",
+          gridTemplateColumns: "auto 1fr auto auto auto auto auto auto",
           alignItems: "center",
           gap: 14,
           width: "100%",
@@ -251,6 +251,17 @@ function SimRow({ sim, configName }: { sim: Simulation; configName?: string }) {
           {sim.passed_tests}/{sim.total_tests} passed
         </span>
         <span style={{ fontSize: 12, color: C.muted }}>{formatDuration(sim.duration_ms)}</span>
+        {onDelete && (
+          <span
+            role="button"
+            tabIndex={0}
+            style={{ color: C.muted, cursor: "pointer", padding: 2, display: "flex" }}
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onDelete(); } }}
+          >
+            <Trash2 style={{ width: 13, height: 13 }} />
+          </span>
+        )}
         <ChevronDown
           style={{
             width: 14,
@@ -320,6 +331,7 @@ export default function Simulations() {
   const [configId, setConfigId] = useState("");
   const [testType, setTestType] = useState("full");
   const [runError, setRunError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const { data: configData } = useQuery({
     queryKey: ["configurations"],
@@ -342,6 +354,14 @@ export default function Simulations() {
     },
     onError: (err: Error) => {
       setRunError(err.message ?? "Failed to start simulation.");
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => simulationsApi.delete(id),
+    onSuccess: () => {
+      setConfirmDeleteId(null);
+      queryClient.invalidateQueries({ queryKey: ["simulations"] });
     },
   });
 
@@ -649,10 +669,38 @@ export default function Simulations() {
         ) : (
           sims.map((sim) => {
             const cfg = configs.find((c) => c.id === sim.configuration_id);
-            return <SimRow key={sim.id} sim={sim} configName={cfg?.name} />;
+            return <SimRow key={sim.id} sim={sim} configName={cfg?.name} onDelete={() => setConfirmDeleteId(sim.id)} />;
           })
         )}
       </div>
+
+      {/* Delete confirmation */}
+      {confirmDeleteId && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 50,
+            background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setConfirmDeleteId(null); }}
+        >
+          <div style={{ background: C.elevated, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24, maxWidth: 380, width: "90%" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 8 }}>Delete simulation?</h3>
+            <p style={{ fontSize: 13, color: C.mutedHi, marginBottom: 16 }}>This simulation and its step results will be permanently deleted.</p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn-secondary" onClick={() => setConfirmDeleteId(null)}>Cancel</button>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ background: "rgba(220,38,38,0.12)", borderColor: "rgba(220,38,38,0.3)", color: C.red }}
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(confirmDeleteId)}
+              >
+                {deleteMutation.isPending ? <Loader2 style={{ width: 13, height: 13, animation: "spin 1s linear infinite" }} /> : <><Trash2 style={{ width: 13, height: 13 }} /> Delete</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -52,6 +52,7 @@ from finspark.schemas.configurations import (
 from finspark.services.config_engine.diff_engine import ConfigDiffEngine
 from finspark.services.config_engine.field_mapper import ConfigGenerator
 from finspark.services.config_engine.rollback import RollbackManager
+from finspark.core import events
 from finspark.services.lifecycle import IntegrationLifecycle, InvalidTransitionError
 from finspark.services.llm.client import GeminiAPIError, GeminiClient, get_llm_client
 from finspark.services.llm.config_generator import generate_config_llm
@@ -345,6 +346,14 @@ async def rollback_configuration(
 
     await db.flush()
 
+    await events.emit(events.CONFIG_ROLLED_BACK, {
+        "tenant_id": tenant.tenant_id,
+        "config_id": config_id,
+        "config_name": config.name,
+        "previous_version": previous_version,
+        "restored_version": restored.version,
+    })
+
     return APIResponse(
         data=RollbackResponse(
             id=restored.id,
@@ -572,6 +581,15 @@ async def generate_configuration(
     config.setdefault("base_url", av_dict.get("base_url", ""))
     config.setdefault("auth", {"type": av_dict.get("auth_type", "api_key"), "credentials": {}})
 
+    # Populate credential vault references (env-var pointers, not plaintext)
+    auth_config = config.get("auth", {})
+    if not auth_config.get("credentials") or auth_config["credentials"] == {}:
+        auth_config["credentials"] = {
+            "api_key": "env:ADAPTER_API_KEY",
+            "api_secret": "env:ADAPTER_API_SECRET",
+        }
+        config["auth"] = auth_config
+
     # Ensure mapped fields have a minimum confidence (synonym/fuzzy matches may lose confidence
     # during augmentation or re-mapping when source fields duplicate target names)
     raw_mappings = config.get("field_mappings", [])
@@ -618,6 +636,14 @@ async def generate_configuration(
             "generation_path": generation_path,
         },
     )
+
+    await events.emit(events.CONFIG_CREATED, {
+        "tenant_id": tenant.tenant_id,
+        "config_id": configuration.id,
+        "config_name": configuration.name,
+        "generation_path": generation_path,
+        "adapter_version_id": request.adapter_version_id,
+    })
 
     field_mappings = config.get("field_mappings", [])
 
@@ -808,6 +834,23 @@ async def transition_configuration(
 
     await db.flush()
 
+    if body.target_state.value == "active":
+        await events.emit(events.CONFIG_DEPLOYED, {
+            "tenant_id": tenant.tenant_id,
+            "config_id": config.id,
+            "config_name": config.name,
+            "previous_state": previous_state.value,
+            "new_state": body.target_state.value,
+        })
+    else:
+        await events.emit(events.CONFIG_UPDATED, {
+            "tenant_id": tenant.tenant_id,
+            "config_id": config.id,
+            "config_name": config.name,
+            "previous_state": previous_state.value,
+            "new_state": body.target_state.value,
+        })
+
     return APIResponse(
         data=TransitionResponse(
             id=config.id,
@@ -883,4 +926,40 @@ async def list_configurations(
             )
             for c in configs
         ],
+    )
+
+
+@router.delete("/{config_id}", response_model=APIResponse[dict])
+async def delete_configuration(
+    config_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = require_role("admin", "editor"),
+    audit: AuditService = Depends(get_audit_service),
+) -> APIResponse[dict]:
+    """Delete a configuration and its history."""
+    stmt = select(Configuration).where(
+        Configuration.id == config_id,
+        Configuration.tenant_id == tenant.tenant_id,
+    )
+    result = await db.execute(stmt)
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuration not found")
+
+    config_name = config.name
+    await db.delete(config)
+    await db.flush()
+
+    await audit.log(
+        tenant_id=tenant.tenant_id,
+        actor=tenant.tenant_name,
+        action="delete_configuration",
+        resource_type="configuration",
+        resource_id=config_id,
+        details={"name": config_name},
+    )
+
+    return APIResponse(
+        data={"id": config_id, "deleted": True},
+        message=f"Configuration '{config_name}' deleted",
     )

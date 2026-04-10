@@ -87,6 +87,77 @@ class DocumentParser:
             raw_entities=self._extract_all_entities(text),
         )
 
+    def build_result_from_llm(
+        self, llm_data: dict[str, Any], doc_type: str, original_text: str
+    ) -> ParsedDocumentResult:
+        """Build ParsedDocumentResult from LLM extraction output.
+
+        Augments LLM results with regex-extracted fields the LLM may have missed.
+        """
+        endpoints = [
+            ExtractedEndpoint(
+                path=ep.get("path", ""),
+                method=ep.get("method", "GET"),
+                description=ep.get("description", ""),
+                parameters=[],
+                is_mandatory=ep.get("is_mandatory", True),
+            )
+            for ep in llm_data.get("endpoints", [])
+        ]
+
+        fields = [
+            ExtractedField(
+                name=f.get("name", ""),
+                data_type=f.get("data_type", "string"),
+                is_required=f.get("is_required", False),
+                source_section=f.get("source_section", ""),
+            )
+            for f in llm_data.get("fields", [])
+        ]
+
+        auth = [
+            ExtractedAuth(
+                auth_type=a.get("auth_type", "api_key"),
+                details=a.get("details", {}),
+            )
+            for a in llm_data.get("auth_requirements", [])
+        ]
+
+        # Augment with regex-extracted fields the LLM may have missed
+        regex_fields = self._extract_fields(original_text)
+        llm_field_names = {f.name for f in fields}
+        for rf in regex_fields:
+            if rf.name not in llm_field_names:
+                fields.append(rf)
+
+        total_entities = len(endpoints) + len(fields) + len(auth) + len(
+            llm_data.get("services_identified", [])
+        )
+        confidence = min(1.0, max(0.7, total_entities / 20.0))
+
+        sla_raw = llm_data.get("sla_requirements", {})
+        sla_list: list[str] = []
+        if isinstance(sla_raw, dict):
+            if sla_raw.get("response_time_ms"):
+                sla_list.append(f"Response time: {sla_raw['response_time_ms']}ms")
+            if sla_raw.get("availability_percent"):
+                sla_list.append(f"Availability: {sla_raw['availability_percent']}%")
+
+        return ParsedDocumentResult(
+            doc_type=doc_type,
+            title=llm_data.get("title", self._extract_title(original_text)),
+            summary=llm_data.get("summary", self._extract_summary(original_text)),
+            services_identified=llm_data.get("services_identified", []),
+            endpoints=endpoints,
+            fields=fields,
+            auth_requirements=auth,
+            security_requirements=llm_data.get("security_requirements", []),
+            sla_requirements=sla_list,
+            sections=self._extract_sections(original_text),
+            confidence_score=round(confidence, 2),
+            raw_entities=self._extract_all_entities(original_text),
+        )
+
     def _parse_docx(self, file_path: Path, doc_type: str = "brd") -> ParsedDocumentResult:
         from docx import Document
 

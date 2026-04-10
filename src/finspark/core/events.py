@@ -19,10 +19,20 @@ def on(event_type: str, handler: EventHandler) -> None:
 
 
 async def emit(event_type: str, data: dict[str, Any]) -> None:
-    """Emit an event to all registered handlers."""
+    """Emit an event to all registered handlers.
+
+    Handlers that return awaitables (coroutines) are awaited.
+    Handlers that return asyncio.Task objects are fire-and-forget
+    (not awaited) so the caller's transaction can commit first.
+    """
+    import asyncio
+
     for handler in _handlers.get(event_type, []):
         try:
             result = handler(data)
+            # Don't await Tasks — they're fire-and-forget background work
+            if isinstance(result, asyncio.Task):
+                continue
             if inspect.isawaitable(result):
                 await result
         except Exception:

@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 
 async def deliver_event(tenant_id: str, event_type: str, payload: dict[str, Any]) -> None:
     """Deliver an event to all matching webhooks for a tenant."""
+    # Yield control to let the calling route's transaction commit first.
+    # Without this, SQLite's single-writer lock causes "database is locked"
+    # because deliver_event opens a new session while the route's is still open.
+    # This delay is harmless — webhook delivery is inherently async/background.
+    await asyncio.sleep(1.0)
+
     async with async_session_factory() as db:
         result = await db.execute(
             select(Webhook).where(

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from finspark.api.dependencies import get_audit_service, get_simulator, get_tenant_context, require_role
+from finspark.core import events
 from finspark.core.json_utils import safe_json_loads
 from finspark.core.audit import AuditService
 from finspark.core.database import async_session_factory, get_db
@@ -144,6 +145,16 @@ async def run_simulation(
         },
     )
 
+    await events.emit(events.SIMULATION_COMPLETED, {
+        "tenant_id": tenant.tenant_id,
+        "simulation_id": simulation.id,
+        "configuration_id": request.configuration_id,
+        "status": simulation.status,
+        "total_tests": total,
+        "passed_tests": passed,
+        "failed_tests": failed,
+    })
+
     return APIResponse(
         data=SimulationResponse(
             id=simulation.id,
@@ -194,6 +205,41 @@ async def get_simulation(
             steps=steps,
             created_at=simulation.created_at,
         ),
+    )
+
+
+@router.delete("/{simulation_id}", response_model=APIResponse[dict])
+async def delete_simulation(
+    simulation_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = require_role("admin", "editor"),
+    audit: AuditService = Depends(get_audit_service),
+) -> APIResponse[dict]:
+    """Delete a simulation and its steps."""
+    stmt = select(Simulation).where(
+        Simulation.id == simulation_id,
+        Simulation.tenant_id == tenant.tenant_id,
+    )
+    result = await db.execute(stmt)
+    sim = result.scalar_one_or_none()
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
+    await db.delete(sim)
+    await db.flush()
+
+    await audit.log(
+        tenant_id=tenant.tenant_id,
+        actor=tenant.tenant_name,
+        action="delete_simulation",
+        resource_type="simulation",
+        resource_id=simulation_id,
+        details={},
+    )
+
+    return APIResponse(
+        data={"id": simulation_id, "deleted": True},
+        message="Simulation deleted",
     )
 
 

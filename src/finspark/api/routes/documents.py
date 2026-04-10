@@ -13,6 +13,7 @@ from finspark.api.dependencies import (
     get_tenant_context,
     require_role,
 )
+from finspark.core import events
 from finspark.core.audit import AuditService
 from finspark.core.config import settings
 from finspark.core.database import get_db
@@ -97,9 +98,30 @@ async def upload_document(
     db.add(doc)
     await db.flush()
 
-    # Parse document
+    # Parse document — for BRD/SOW, try LLM after initial text extraction
     try:
         result = await asyncio.to_thread(parser.parse, file_path, doc_type=doc_type)
+
+        # For BRD/SOW, try LLM-powered extraction for better accuracy
+        if doc_type in ("brd", "sow"):
+            try:
+                from finspark.services.parsing.llm_parser import extract_entities_llm
+
+                # Use decoded file bytes for text files, or parsed summary for binary
+                file_ext = suffix.lstrip(".")
+                if file_ext in ("yaml", "yml", "json"):
+                    raw_text_for_llm = file_bytes.decode("utf-8", errors="replace")
+                else:
+                    raw_text_for_llm = result.summary
+
+                llm_parsed = await extract_entities_llm(raw_text_for_llm)
+                if llm_parsed:
+                    result = parser.build_result_from_llm(
+                        llm_parsed, doc_type, raw_text_for_llm
+                    )
+            except Exception:
+                pass  # Keep the regex-based result
+
         doc.parsed_result = result.model_dump_json()
         doc.raw_text = result.summary[:5000]
         doc.status = "parsed"
@@ -108,6 +130,14 @@ async def upload_document(
         doc.error_message = str(e)
 
     await db.flush()
+
+    if doc.status == "parsed":
+        await events.emit(events.DOCUMENT_PARSED, {
+            "tenant_id": tenant.tenant_id,
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "doc_type": doc_type,
+        })
 
     await audit.log(
         tenant_id=tenant.tenant_id,
@@ -173,7 +203,7 @@ async def get_document(
 async def delete_document(
     document_id: str,
     db: AsyncSession = Depends(get_db),
-    tenant: TenantContext = require_role("admin"),
+    tenant: TenantContext = require_role("admin", "editor"),
     audit: AuditService = Depends(get_audit_service),
 ) -> APIResponse[dict]:
     """Delete a document and its uploaded file."""
