@@ -1365,15 +1365,16 @@ export default function Configurations() {
                         </button>
                       );
                     })}
-                    {cfg.version > 1 && (
+                    {!["draft"].includes(cfg.status) && (
                       <button
                         type="button"
                         className="btn-secondary"
                         style={{ fontSize: 11, padding: "5px 10px" }}
                         disabled={rollbackMutation.isPending}
                         onClick={() => {
-                          if (window.confirm(`Roll back "${cfg.name}" to version ${cfg.version - 1}?`)) {
-                            rollbackMutation.mutate({ id: cfg.id, version: cfg.version - 1 });
+                          const targetVersion = Math.max(1, cfg.version - 1);
+                          if (window.confirm(`Roll back "${cfg.name}" to version ${targetVersion}? This will revert to the previous state.`)) {
+                            rollbackMutation.mutate({ id: cfg.id, version: targetVersion });
                           }
                         }}
                       >
