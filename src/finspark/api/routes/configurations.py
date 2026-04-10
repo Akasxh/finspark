@@ -581,6 +581,15 @@ async def generate_configuration(
     config.setdefault("base_url", av_dict.get("base_url", ""))
     config.setdefault("auth", {"type": av_dict.get("auth_type", "api_key"), "credentials": {}})
 
+    # Populate credential vault references (env-var pointers, not plaintext)
+    auth_config = config.get("auth", {})
+    if not auth_config.get("credentials") or auth_config["credentials"] == {}:
+        auth_config["credentials"] = {
+            "api_key": "env:ADAPTER_API_KEY",
+            "api_secret": "env:ADAPTER_API_SECRET",
+        }
+        config["auth"] = auth_config
+
     # Ensure mapped fields have a minimum confidence (synonym/fuzzy matches may lose confidence
     # during augmentation or re-mapping when source fields duplicate target names)
     raw_mappings = config.get("field_mappings", [])
