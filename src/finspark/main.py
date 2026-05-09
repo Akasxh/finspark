@@ -24,6 +24,7 @@ from finspark.api.routes import (
     search,
     simulations,
     webhooks,
+    workflows,
 )
 from finspark.core.config import settings
 from finspark.core.database import init_db
@@ -159,6 +160,7 @@ app.include_router(search.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(observability.router, prefix="/api/v1")
 app.include_router(proxy.router, prefix="/api/v1")
+app.include_router(workflows.router, prefix="/api/v1")
 app.include_router(analytics.router)
 
 
