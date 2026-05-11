@@ -241,8 +241,16 @@ class TestGeminiClientLifecycle:
         original = mod._shared_client
         try:
             mod._shared_client = None
-            cls_name = "OpenRouterClient" if _settings.llm_provider == "openrouter" else "GeminiClient"
-            with patch.object(mod, cls_name) as mock_cls:
+            provider = _settings.llm_provider
+            if provider == "openai":
+                from finspark.services.llm import openai_client as _mod_oai
+                target_mod, cls_name = _mod_oai, "OpenAIClient"
+            elif provider == "openrouter":
+                from finspark.services.llm import openrouter_client as _mod_orc
+                target_mod, cls_name = _mod_orc, "OpenRouterClient"
+            else:
+                target_mod, cls_name = mod, "GeminiClient"
+            with patch.object(target_mod, cls_name) as mock_cls:
                 mock_cls.return_value
                 c1 = get_llm_client()
                 c2 = get_llm_client()

@@ -46,13 +46,16 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("./uploads")
     max_upload_size_mb: int = 50
 
-    # AI (optional)
-    llm_provider: str = "openrouter"
+    # AI (optional). llm_provider selects backend: openai | openrouter | gemini
+    llm_provider: str = "openai"
     llm_api_key: str = ""
     openai_api_key: str = ""
     openrouter_api_key: str = ""
-    llm_model: str = "anthropic/claude-sonnet-4-6"
-    llm_model_reasoning: str = "anthropic/claude-opus-4-7"
+    # Defaults match the OpenAI GPT-5 family. When llm_provider switches to
+    # openrouter, set llm_model to "anthropic/claude-sonnet-4-6" and
+    # llm_model_reasoning to "anthropic/claude-opus-4-7" via env.
+    llm_model: str = "gpt-5-mini"
+    llm_model_reasoning: str = "gpt-5"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3-flash-preview"
     ai_enabled: bool = False

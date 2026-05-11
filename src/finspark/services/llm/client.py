@@ -153,22 +153,25 @@ class GeminiClient:
 # ---------------------------------------------------------------------------
 # Module-level shared client (created lazily, closed by app lifespan)
 # ---------------------------------------------------------------------------
-_shared_client: GeminiClient | OpenRouterClient | None = None
+_shared_client: GeminiClient | OpenRouterClient | OpenAIClient | None = None
 
 
-def _create_client() -> GeminiClient | OpenRouterClient:
+def _create_client() -> GeminiClient | OpenRouterClient | OpenAIClient:
     """Instantiate the correct LLM client based on settings."""
-    from finspark.services.llm.openrouter_client import OpenRouterClient as _ORC
-
+    if settings.llm_provider == "openai" and settings.openai_api_key:
+        from finspark.services.llm.openai_client import OpenAIClient as _OAI
+        return _OAI()
     if settings.llm_provider == "openrouter" and settings.openrouter_api_key:
+        from finspark.services.llm.openrouter_client import OpenRouterClient as _ORC
         return _ORC()
     return GeminiClient()
 
 
-def get_llm_client() -> GeminiClient | OpenRouterClient:
+def get_llm_client() -> GeminiClient | OpenRouterClient | OpenAIClient:
     """Return (or lazily create) the module-level shared LLM client.
 
     Dispatches based on ``settings.llm_provider``:
+    - ``"openai"`` (with a key set) -> :class:`OpenAIClient` (GPT-5 family)
     - ``"openrouter"`` (with a key set) -> :class:`OpenRouterClient`
     - Otherwise falls back to :class:`GeminiClient`
 
