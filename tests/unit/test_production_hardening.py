@@ -230,14 +230,20 @@ class TestGeminiClientLifecycle:
         await c.close()
 
     def test_get_llm_client_returns_singleton(self) -> None:
-        """get_llm_client returns the same instance on repeated calls."""
+        """get_llm_client returns the same instance on repeated calls.
+
+        Mocks the provider-specific class based on settings.llm_provider so this
+        test works whether Gemini or OpenRouter is active.
+        """
         import finspark.services.llm.client as mod
+        from finspark.core.config import settings as _settings
 
         original = mod._shared_client
         try:
             mod._shared_client = None
-            with patch.object(mod, "GeminiClient") as mock_cls:
-                mock_instance = mock_cls.return_value
+            cls_name = "OpenRouterClient" if _settings.llm_provider == "openrouter" else "GeminiClient"
+            with patch.object(mod, cls_name) as mock_cls:
+                mock_cls.return_value
                 c1 = get_llm_client()
                 c2 = get_llm_client()
                 assert c1 is c2

@@ -2,6 +2,7 @@ import { useToast } from "@/components/Toast";
 import { adaptersApi, configurationsApi, documentsApi, simulationsApi } from "@/lib/api";
 import type {
   Adapter,
+  AdapterEndpoint,
   ConfigDiffItem,
   ConfigDiffResponse,
   ConfigHistoryEntry,
@@ -21,6 +22,7 @@ import {
   Download,
   GitCompare,
   History,
+  Link,
   Loader2,
   PlayCircle,
   Plus,
@@ -452,7 +454,209 @@ function MappingsTable({ cfg }: { cfg: Configuration }) {
   );
 }
 
-type DetailTab = "mappings" | "history" | "validation";
+// ── Chain helpers ────────────────────────────────────────────────────────────
+
+/** Returns true if any endpoint in the list has an `id` set (i.e. chaining is configured). */
+function hasChaining(endpoints: AdapterEndpoint[] | undefined): boolean {
+  return !!endpoints && endpoints.some((ep) => !!ep.id);
+}
+
+/** Topological sort of endpoints by depends_on. Returns sorted list + a hasCycle flag. */
+function buildChainOrder(endpoints: AdapterEndpoint[]): { sorted: AdapterEndpoint[]; hasCycle: boolean } {
+  const byId = new Map<string, AdapterEndpoint>();
+  for (const ep of endpoints) {
+    if (ep.id) byId.set(ep.id, ep);
+  }
+
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const order: string[] = [];
+  let hasCycle = false;
+
+  function visit(id: string) {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) { hasCycle = true; return; }
+    visiting.add(id);
+    const ep = byId.get(id);
+    if (ep?.depends_on) {
+      const deps = Array.isArray(ep.depends_on) ? ep.depends_on : [ep.depends_on];
+      for (const dep of deps) visit(dep);
+    }
+    visiting.delete(id);
+    visited.add(id);
+    order.push(id);
+  }
+
+  for (const id of byId.keys()) visit(id);
+
+  if (hasCycle) return { sorted: endpoints, hasCycle: true };
+
+  // Build sorted array: topo-ordered endpoints first, then any without id
+  const sorted: AdapterEndpoint[] = [];
+  for (const id of order) {
+    const ep = byId.get(id);
+    if (ep) sorted.push(ep);
+  }
+  for (const ep of endpoints) {
+    if (!ep.id) sorted.push(ep);
+  }
+  return { sorted, hasCycle: false };
+}
+
+function ChainPanel({ endpoints }: { endpoints: AdapterEndpoint[] }) {
+  if (!hasChaining(endpoints)) {
+    return (
+      <div style={{
+        padding: "24px 16px", textAlign: "center",
+        borderRadius: 8, border: "1px dashed var(--color-border)",
+        background: "var(--color-bg-base)",
+      }}>
+        <p style={{ fontSize: 13, color: "var(--color-text-muted)", lineHeight: 1.5 }}>
+          This config doesn't use API chaining. Endpoints run independently.
+        </p>
+      </div>
+    );
+  }
+
+  const { sorted, hasCycle } = buildChainOrder(endpoints);
+  const chainEndpoints = sorted.filter((ep) => !!ep.id);
+
+  // Build a lookup for extract keys by source endpoint id
+  const extractsBySource = new Map<string, string[]>();
+  for (const ep of chainEndpoints) {
+    if (ep.id && ep.extract) {
+      extractsBySource.set(ep.id, Object.keys(ep.extract));
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      {hasCycle && (
+        <div style={{
+          padding: "8px 12px", marginBottom: 12, borderRadius: 6,
+          background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.2)",
+          fontSize: 12, color: "var(--color-warning-text)",
+        }}>
+          Cycle detected in dependency graph. Showing endpoints in original order.
+        </div>
+      )}
+
+      {chainEndpoints.map((ep, idx) => {
+        const deps = ep.depends_on
+          ? (Array.isArray(ep.depends_on) ? ep.depends_on : [ep.depends_on])
+          : [];
+        const injectEntries = ep.inject ? Object.entries(ep.inject) : [];
+
+        // Collect extract keys from upstream dependencies for the arrow label
+        const upstreamExtractKeys: string[] = [];
+        for (const depId of deps) {
+          const keys = extractsBySource.get(depId);
+          if (keys) upstreamExtractKeys.push(...keys);
+        }
+
+        return (
+          <div key={ep.id ?? idx}>
+            {/* Arrow connector from previous endpoint */}
+            {idx > 0 && (
+              <div style={{
+                display: "flex", flexDirection: "column", alignItems: "center",
+                padding: "4px 0",
+              }}>
+                <div style={{
+                  width: 1, height: 16,
+                  background: "var(--color-teal)",
+                }} />
+                {upstreamExtractKeys.length > 0 && (
+                  <div style={{
+                    padding: "2px 8px", borderRadius: 4,
+                    background: "rgba(56,229,205,0.08)", border: "1px solid rgba(56,229,205,0.15)",
+                    fontSize: 10, color: "var(--color-teal)", whiteSpace: "nowrap",
+                  }}>
+                    extracts: {upstreamExtractKeys.join(", ")}
+                  </div>
+                )}
+                <div style={{
+                  fontSize: 14, lineHeight: 1, color: "var(--color-teal)",
+                  marginTop: 2,
+                }}>
+                  ↓
+                </div>
+              </div>
+            )}
+
+            {/* Endpoint card */}
+            <div style={{
+              borderRadius: 8, border: "1px solid var(--color-border)",
+              background: "var(--color-bg-raised)", padding: "12px 16px",
+              display: "flex", flexDirection: "column", gap: 6,
+            }}>
+              {/* Header: method + path */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                  padding: "2px 6px", borderRadius: 4,
+                  background: "rgba(56,229,205,0.1)", color: "var(--color-teal)",
+                  fontFamily: "monospace", letterSpacing: "0.04em",
+                }}>
+                  {ep.method}
+                </span>
+                <span style={{
+                  fontSize: 13, fontWeight: 500, fontFamily: "monospace",
+                  color: "var(--color-text-primary)",
+                }}>
+                  {ep.path}
+                </span>
+              </div>
+
+              {/* ID label */}
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                id: <code style={{ fontFamily: "monospace", color: "var(--color-text-secondary)" }}>{ep.id}</code>
+              </div>
+
+              {/* Depends on */}
+              {deps.length > 0 && (
+                <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                  depends on:{" "}
+                  {deps.map((d, di) => (
+                    <span key={d}>
+                      {di > 0 && ", "}
+                      <code style={{ fontFamily: "monospace", color: "var(--color-brand-light)" }}>{d}</code>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Inject mappings */}
+              {injectEntries.length > 0 && (
+                <div style={{
+                  marginTop: 4, padding: "6px 10px", borderRadius: 6,
+                  background: "rgba(56,229,205,0.04)", border: "1px solid rgba(56,229,205,0.1)",
+                  display: "flex", flexDirection: "column", gap: 3,
+                }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, textTransform: "uppercase",
+                    letterSpacing: "0.05em", color: "var(--color-teal)",
+                  }}>
+                    Injects
+                  </span>
+                  {injectEntries.map(([target, template]) => (
+                    <div key={target} style={{ fontSize: 11, fontFamily: "monospace" }}>
+                      <span style={{ color: "var(--color-text-secondary)" }}>{target}</span>
+                      <span style={{ color: "var(--color-text-muted)", margin: "0 4px" }}>&larr;</span>
+                      <span style={{ color: "var(--color-brand-light)" }}>{template}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type DetailTab = "mappings" | "history" | "validation" | "chain";
 
 function ConfigDetail({ cfg }: { cfg: Configuration }) {
   const [activeTab, setActiveTab] = useState<DetailTab>("mappings");
@@ -481,10 +685,12 @@ function ConfigDetail({ cfg }: { cfg: Configuration }) {
     }
   };
 
+  const showChainTab = hasChaining(cfg.endpoints);
   const tabs: { id: DetailTab; label: string; icon: React.ElementType }[] = [
     { id: "mappings", label: "Mappings", icon: Settings },
     { id: "history", label: "History", icon: History },
     { id: "validation", label: "Validation", icon: BarChart3 },
+    ...(showChainTab ? [{ id: "chain" as const, label: "Chain", icon: Link }] : []),
   ];
 
   return (
@@ -565,6 +771,7 @@ function ConfigDetail({ cfg }: { cfg: Configuration }) {
         {activeTab === "mappings" && <MappingsTable key={cfg.id} cfg={cfg} />}
         {activeTab === "history" && <HistoryPanel configId={cfg.id} currentVersion={cfg.version} />}
         {activeTab === "validation" && <ValidationPanel configId={cfg.id} />}
+        {activeTab === "chain" && <ChainPanel endpoints={cfg.endpoints ?? []} />}
       </div>
 
       {/* Meta */}

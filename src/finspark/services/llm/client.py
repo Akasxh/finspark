@@ -17,8 +17,12 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 
-class GeminiAPIError(Exception):
-    """Raised when the Gemini API returns an error or unexpected response."""
+class LLMAPIError(Exception):
+    """Raised when an LLM API returns an error or unexpected response."""
+
+
+# Backward-compatible alias
+GeminiAPIError = LLMAPIError
 
 
 class GeminiClient:
@@ -149,16 +153,29 @@ class GeminiClient:
 # ---------------------------------------------------------------------------
 # Module-level shared client (created lazily, closed by app lifespan)
 # ---------------------------------------------------------------------------
-_shared_client: GeminiClient | None = None
+_shared_client: GeminiClient | OpenRouterClient | None = None
 
 
-def get_llm_client() -> GeminiClient:
-    """Return (or lazily create) the module-level shared GeminiClient.
+def _create_client() -> GeminiClient | OpenRouterClient:
+    """Instantiate the correct LLM client based on settings."""
+    from finspark.services.llm.openrouter_client import OpenRouterClient as _ORC
+
+    if settings.llm_provider == "openrouter" and settings.openrouter_api_key:
+        return _ORC()
+    return GeminiClient()
+
+
+def get_llm_client() -> GeminiClient | OpenRouterClient:
+    """Return (or lazily create) the module-level shared LLM client.
+
+    Dispatches based on ``settings.llm_provider``:
+    - ``"openrouter"`` (with a key set) -> :class:`OpenRouterClient`
+    - Otherwise falls back to :class:`GeminiClient`
 
     The lifespan handler in main.py calls ``_shared_client.close()`` on shutdown
     so the httpx connection pool is released cleanly.
     """
     global _shared_client  # noqa: PLW0603
     if _shared_client is None:
-        _shared_client = GeminiClient()
+        _shared_client = _create_client()
     return _shared_client

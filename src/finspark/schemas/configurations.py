@@ -8,6 +8,26 @@ from pydantic import BaseModel, ConfigDict, Field
 from finspark.schemas.common import ConfigStatus
 
 
+class EndpointConfig(BaseModel):
+    """Schema for a single endpoint within an integration configuration.
+
+    The `id`, `depends_on`, `extract`, and `inject` fields enable API chaining:
+    endpoints can declare dependencies on prior endpoints and wire extracted
+    response values into subsequent requests via template substitution.
+    """
+
+    path: str
+    method: str = "GET"
+    description: str | None = None
+    enabled: bool = True
+
+    # --- API chaining fields (all optional for backward compat) ---
+    id: str | None = None
+    depends_on: str | list[str] | None = None
+    extract: dict[str, str] | None = None  # {local_key: JSONPath expression}
+    inject: dict[str, str] | None = None  # {dotted.request.path: "Bearer {{step.field}}"}
+
+
 class FieldMapping(BaseModel):
     """A single field mapping from source to target."""
 

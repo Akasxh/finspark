@@ -15,6 +15,11 @@ class ExtractedEndpoint(BaseModel):
     description: str = ""
     parameters: list[dict[str, str]] = []
     is_mandatory: bool = True
+    # Chaining fields — populated when the LLM detects multi-step flows
+    id: str | None = None
+    depends_on: str | list[str] | None = None
+    extract: dict[str, str] | None = None
+    inject: dict[str, str] | None = None
 
 
 class ExtractedField(BaseModel):

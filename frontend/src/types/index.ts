@@ -20,6 +20,11 @@ export interface AdapterEndpoint {
   description: string;
   request_fields: Record<string, unknown>[];
   response_fields: Record<string, unknown>[];
+  // API chaining fields
+  id?: string;
+  depends_on?: string | string[];
+  extract?: Record<string, string>;
+  inject?: Record<string, string>;
 }
 
 export interface AdapterVersion {
@@ -98,6 +103,8 @@ export interface Configuration {
   hooks?: Record<string, unknown>[];
   created_at: string;
   updated_at: string;
+  // API chaining: endpoints with dependency graph
+  endpoints?: AdapterEndpoint[];
   // legacy optional fields kept for backward compat
   adapter_type?: string;
   parameters?: Record<string, unknown>;

@@ -47,8 +47,12 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 50
 
     # AI (optional)
+    llm_provider: str = "openrouter"
     llm_api_key: str = ""
     openai_api_key: str = ""
+    openrouter_api_key: str = ""
+    llm_model: str = "anthropic/claude-sonnet-4-6"
+    llm_model_reasoning: str = "anthropic/claude-opus-4-7"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3-flash-preview"
     ai_enabled: bool = False
