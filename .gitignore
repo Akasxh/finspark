@@ -32,3 +32,5 @@ backend/__pycache__/
 agents/
 docs/AGENT_PERSONAS.md
 docs/DISCUSSION.md
+TEAM_HANDOFF.md
+.env.team
