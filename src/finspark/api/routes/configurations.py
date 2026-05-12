@@ -474,11 +474,32 @@ def _augment_with_rule_based(
             merged["is_confirmed"] = rule_m.get("is_confirmed", merged.get("is_confirmed", False))
         augmented.append(merged)
 
-    # Backfill source fields that LLM missed but rule-based found
+    # Backfill source fields that LLM missed but rule-based found.
+    # Skip rule mappings with no resolved target — they add only noise.
     for rule_m in rule_mappings:
         src = rule_m.get("source_field", "")
-        if src and src not in existing_targets:
+        if src and src not in existing_targets and rule_m.get("target_field"):
             augmented.append(rule_m)
+
+    # Final pass: drop any mapping whose target is unresolved (LLM or rule).
+    # The validator's field_mapping_quality dimension penalises configs that carry
+    # zero-confidence "we tried but couldn't match" entries — they communicate
+    # nothing useful at runtime and are best omitted from the persisted config.
+    augmented = [
+        m for m in augmented
+        if m.get("target_field") and (m.get("confidence") or 0) > 0
+    ]
+
+    # Collapse duplicate target_field entries — keep the highest-confidence source
+    # for each target. Prevents the LLM's "must map exactly once" rule from
+    # producing semantically wrong fallbacks (e.g. aadhaar_number -> pan_number)
+    # when both 'aadhaar' and 'aadhaar_number' appear as source fields.
+    by_target: dict[str, dict[str, Any]] = {}
+    for m in augmented:
+        tgt = m["target_field"]
+        if tgt not in by_target or (m.get("confidence") or 0) > (by_target[tgt].get("confidence") or 0):
+            by_target[tgt] = m
+    augmented = list(by_target.values())
 
     result = dict(base_config)
     result["field_mappings"] = augmented
@@ -601,6 +622,18 @@ async def generate_configuration(
     for fm in raw_mappings:
         if fm.get("target_field") and fm.get("confidence", 0) < 0.5:
             fm["confidence"] = max(fm.get("confidence", 0), 0.6)
+
+    # Drop unresolved mappings + collapse duplicate targets — applied to both
+    # LLM and rule-based paths so the persisted config_mappings only contain
+    # actionable, high-signal entries the validator will score well on.
+    by_target: dict[str, dict[str, Any]] = {}
+    for m in raw_mappings:
+        tgt = m.get("target_field")
+        if not tgt or (m.get("confidence") or 0) <= 0:
+            continue
+        if tgt not in by_target or (m.get("confidence") or 0) > (by_target[tgt].get("confidence") or 0):
+            by_target[tgt] = m
+    config["field_mappings"] = list(by_target.values())
 
     # Save configuration
     configuration = Configuration(

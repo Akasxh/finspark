@@ -83,8 +83,8 @@ const TRANSITION_BUTTONS: Record<
   { label: string; icon: React.ElementType; targetState: string }[]
 > = {
   draft: [{ label: "Mark Configured", icon: CheckCircle2, targetState: "configured" }],
-  configured: [{ label: "Start Validation", icon: PlayCircle, targetState: "validating" }],
-  validating: [{ label: "Start Testing", icon: PlayCircle, targetState: "testing" }],
+  configured: [{ label: "Validate & Run Tests", icon: PlayCircle, targetState: "__pipeline__" }],
+  validating: [{ label: "Run Tests", icon: PlayCircle, targetState: "__pipeline__" }],
   testing: [{ label: "Deploy", icon: Rocket, targetState: "active" }],
 };
 
@@ -1138,6 +1138,151 @@ function GenerateForm({ onDone }: { onDone: () => void }) {
   );
 }
 
+// ── Validation pipeline (one-click validate → test) ──────────────────────────
+
+type StepStatus = "pending" | "running" | "passed" | "failed";
+type PipelineStep = { name: string; status: StepStatus; confidence?: number; analysis?: string };
+type PipelinePhase = "validating" | "testing" | "done" | "error";
+type PipelineUI = {
+  configId: string;
+  configName: string;
+  phase: PipelinePhase;
+  validation: PipelineStep[];
+  testing: PipelineStep[];
+  errorMsg?: string;
+};
+
+// Seed names — we render these as "running" the moment the user clicks, before
+// the LLM call returns, so the panel never feels stale. The LLM verdict snaps
+// each row to its real status when the request resolves.
+const VALIDATION_STEPS_SEED: string[] = [
+  "config_structure_validation",
+  "field_mapping_quality",
+  "auth_configuration_adequacy",
+  "error_handling_robustness",
+  "retry_logic_appropriateness",
+  "endpoint_configuration_validity",
+  "security_best_practices",
+];
+
+const TEST_STEPS_SEED: string[] = [
+  "auth_handshake",
+  "happy_path_endpoint",
+  "error_envelope_check",
+  "retry_behaviour",
+];
+
+function ValidationPipelinePanel({ ui, onClose }: { ui: PipelineUI; onClose: () => void }) {
+  const phaseLabel: Record<PipelinePhase, string> = {
+    validating: "Phase 1 of 2 — Validating Configuration",
+    testing: "Phase 2 of 2 — Running Smoke Tests",
+    done: "Pipeline Complete — Ready to Deploy",
+    error: "Pipeline Stopped",
+  };
+  const phaseColor: Record<PipelinePhase, string> = {
+    validating: "var(--color-primary)",
+    testing: "var(--color-primary)",
+    done: "var(--color-success-text)",
+    error: "var(--color-error-text)",
+  };
+  return (
+    <div
+      style={{
+        padding: 16,
+        borderRadius: 10,
+        border: `1px solid ${phaseColor[ui.phase]}`,
+        background: "var(--color-surface-2)",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {ui.phase === "validating" || ui.phase === "testing" ? (
+            <Loader2 style={{ width: 16, height: 16, color: phaseColor[ui.phase], animation: "spin 1s linear infinite" }} />
+          ) : ui.phase === "done" ? (
+            <CheckCircle2 style={{ width: 16, height: 16, color: phaseColor[ui.phase] }} />
+          ) : (
+            <AlertCircle style={{ width: 16, height: 16, color: phaseColor[ui.phase] }} />
+          )}
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: phaseColor[ui.phase] }}>
+              {phaseLabel[ui.phase]}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{ui.configName}</div>
+          </div>
+        </div>
+        {(ui.phase === "done" || ui.phase === "error") && (
+          <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 10px" }} onClick={onClose}>
+            Dismiss
+          </button>
+        )}
+      </div>
+      <PipelineStepGroup title="Validation dimensions" steps={ui.validation} />
+      <PipelineStepGroup title="Smoke tests" steps={ui.testing} />
+      {ui.errorMsg && (
+        <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "rgba(248,113,113,0.06)", color: "var(--color-error-text)", fontSize: 12 }}>
+          {ui.errorMsg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PipelineStepGroup({ title, steps }: { title: string; steps: PipelineStep[] }) {
+  if (steps.length === 0) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--color-text-muted)", marginBottom: 6 }}>
+        {title}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {steps.map((s) => (
+          <PipelineStepRow key={s.name} step={s} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PipelineStepRow({ step }: { step: PipelineStep }) {
+  const icon =
+    step.status === "passed" ? (
+      <CheckCircle2 style={{ width: 13, height: 13, color: "var(--color-success-text)" }} />
+    ) : step.status === "failed" ? (
+      <AlertCircle style={{ width: 13, height: 13, color: "var(--color-error-text)" }} />
+    ) : step.status === "running" ? (
+      <Loader2 style={{ width: 13, height: 13, color: "var(--color-primary)", animation: "spin 1s linear infinite" }} />
+    ) : (
+      <Clock style={{ width: 13, height: 13, color: "var(--color-text-muted)" }} />
+    );
+  const label = step.name.replace(/_/g, " ");
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8,
+        padding: "6px 10px",
+        borderRadius: 6,
+        background: "var(--color-surface-1)",
+      }}
+    >
+      {icon}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{label}</div>
+        {step.analysis && (
+          <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>{step.analysis}</div>
+        )}
+      </div>
+      {typeof step.confidence === "number" && (
+        <span className="mono" style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+          {Math.round((step.confidence || 0) * 100)}%
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Configurations() {
@@ -1156,6 +1301,108 @@ export default function Configurations() {
   const [lastSimResult, setLastSimResult] = useState<{
     configId: string; status: string; passed: number; total: number; steps: Array<{ step_name: string; status: string; error_message?: string }>;
   } | null>(null);
+
+  const [pipeline, setPipeline] = useState<PipelineUI | null>(null);
+
+  // One-click pipeline: configured → validate (LLM 7-dim) → testing → smoke.
+  // Optimistically renders skeleton step rows the moment the user clicks,
+  // then snaps each row to the real verdict when the LLM call resolves.
+  const runPipelineMutation = useMutation({
+    mutationFn: async ({ id, name, currentStatus }: { id: string; name: string; currentStatus: string }) => {
+      // Phase 1 — Validation
+      setPipeline({
+        configId: id,
+        configName: name,
+        phase: "validating",
+        validation: VALIDATION_STEPS_SEED.map((n) => ({ name: n, status: "running" as StepStatus })),
+        testing: [],
+      });
+
+      if (currentStatus === "configured") {
+        try {
+          await configurationsApi.transition(id, "validating");
+        } catch {
+          // already validating, ignore
+        }
+      }
+
+      const valResp = await simulationsApi.run({ configuration_id: id, test_type: "integration" });
+      const valData = valResp.data;
+      const valSteps: PipelineStep[] = (valData?.steps || []).map((s: any) => ({
+        name: s.step_name,
+        status: (s.status === "passed" ? "passed" : "failed") as StepStatus,
+        confidence: s.confidence_score ?? undefined,
+        analysis: s.error_message || undefined,
+      }));
+      setPipeline((s) => (s ? { ...s, validation: valSteps.length ? valSteps : s.validation } : s));
+
+      if (!valData || valData.status !== "passed") {
+        setPipeline((s) =>
+          s
+            ? {
+                ...s,
+                phase: "error",
+                errorMsg: valData
+                  ? `Validation: ${valData.passed_tests}/${valData.total_tests} dimensions passed`
+                  : "Validation request failed",
+              }
+            : s,
+        );
+        return;
+      }
+
+      // Phase 2 — Smoke tests
+      setPipeline((s) =>
+        s
+          ? {
+              ...s,
+              phase: "testing",
+              testing: TEST_STEPS_SEED.map((n) => ({ name: n, status: "running" as StepStatus })),
+            }
+          : s,
+      );
+
+      try {
+        await configurationsApi.transition(id, "testing");
+      } catch {
+        // already testing, ignore
+      }
+
+      const testResp = await simulationsApi.run({ configuration_id: id, test_type: "smoke" });
+      const testData = testResp.data;
+      const testSteps: PipelineStep[] = (testData?.steps || []).map((s: any) => ({
+        name: s.step_name,
+        status: (s.status === "passed" ? "passed" : "failed") as StepStatus,
+        confidence: s.confidence_score ?? undefined,
+        analysis: s.error_message || undefined,
+      }));
+      setPipeline((s) =>
+        s
+          ? {
+              ...s,
+              testing: testSteps.length ? testSteps : s.testing,
+              phase: testData && testData.status === "passed" ? "done" : "error",
+              errorMsg:
+                testData && testData.status === "passed"
+                  ? undefined
+                  : testData
+                    ? `Smoke: ${testData.passed_tests}/${testData.total_tests} tests passed`
+                    : "Smoke request failed",
+            }
+          : s,
+      );
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["configurations"] });
+      queryClient.invalidateQueries({ queryKey: ["config-history"] });
+    },
+    onError: (err: unknown) => {
+      setPipeline((s) =>
+        s ? { ...s, phase: "error", errorMsg: err instanceof Error ? err.message : "Pipeline failed" } : s,
+      );
+      toast("Validation pipeline failed.", "error");
+    },
+  });
 
   const transitionMutation = useMutation({
     mutationFn: async ({ id, targetState }: { id: string; targetState: string }) => {
@@ -1228,6 +1475,11 @@ export default function Configurations() {
       {/* Compare modal */}
       {showCompare && configs.length >= 2 && (
         <CompareModal configs={configs} onClose={() => setShowCompare(false)} />
+      )}
+
+      {/* Live pipeline progress (one-click validate + smoke) */}
+      {pipeline && (
+        <ValidationPipelinePanel ui={pipeline} onClose={() => setPipeline(null)} />
       )}
 
       {/* Header */}
@@ -1336,21 +1588,34 @@ export default function Configurations() {
                   <div style={{ display: "flex", gap: 8 }} onClick={(e) => e.stopPropagation()}>
                     {transitions.map((t) => {
                       const TIcon = t.icon;
+                      const isPipeline = t.targetState === "__pipeline__";
+                      const busy = isPipeline
+                        ? runPipelineMutation.isPending && pipeline?.configId === cfg.id
+                        : transitionMutation.isPending;
                       return (
                         <button
-                          key={t.targetState}
+                          key={t.targetState + cfg.status}
                           type="button"
                           className="btn-secondary"
                           style={{ fontSize: 11, padding: "5px 10px" }}
-                          disabled={transitionMutation.isPending}
+                          disabled={busy || runPipelineMutation.isPending}
                           onClick={() => {
+                            if (isPipeline) {
+                              setLastSimResult(null);
+                              runPipelineMutation.mutate({ id: cfg.id, name: cfg.name, currentStatus: cfg.status });
+                              return;
+                            }
                             if (t.targetState === "active" && !window.confirm(`Deploy "${cfg.name}" to production?`)) return;
                             setLastSimResult(null);
                             transitionMutation.mutate({ id: cfg.id, targetState: t.targetState });
                           }}
                         >
-                          <TIcon style={{ width: 12, height: 12 }} />
-                          {t.label}
+                          {busy ? (
+                            <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
+                          ) : (
+                            <TIcon style={{ width: 12, height: 12 }} />
+                          )}
+                          {busy ? "Running…" : t.label}
                         </button>
                       );
                     })}

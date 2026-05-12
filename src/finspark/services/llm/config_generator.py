@@ -61,8 +61,38 @@ Return a JSON object with these fields:
     }}
   ],
   "headers": {{}},
+  "error_handling": {{
+    "envelope_schema": "string - canonical error response schema name (e.g. ErrorEnvelope)",
+    "on_4xx": "string - strategy for 4xx (e.g. surface_to_caller_no_retry)",
+    "on_5xx": "string - strategy for 5xx (e.g. retry_with_backoff_then_circuit_break)",
+    "circuit_breaker": {{
+      "failure_threshold": "integer",
+      "recovery_timeout_seconds": "integer"
+    }},
+    "fallback_strategy": "string - e.g. queue_for_manual_review",
+    "retryable_status_codes": "array<integer> - status codes to retry"
+  }},
+  "hooks": [
+    {{
+      "event": "string - e.g. on_request, on_response, on_error, on_retry",
+      "action": "string - e.g. log_masked, refresh_token, emit_metric, dead_letter",
+      "config": {{}}
+    }}
+  ],
+  "security": {{
+    "tls_version_minimum": "string - e.g. 1.2 or 1.3",
+    "pii_masking": {{}},
+    "credential_storage": "string - e.g. encrypted_vault_only",
+    "audit_logging": "string - e.g. all_requests_and_responses"
+  }},
   "notes": "string - any caveats or assumptions made"
-}}"""
+}}
+
+Populate every section. Use values from the parsed document where present;
+otherwise infer secure defaults appropriate for the adapter type
+(API key/OAuth2/Bearer). Always include at least one hook for on_error
+(e.g. retry_with_backoff or alert) and one for on_request (e.g. log_masked).
+"""
 
 
 async def generate_config_llm(
