@@ -1,0 +1,154 @@
+openapi: "3.0.3"
+info:
+  title: Perfect KYC Verification API
+  version: "1.0.0"
+  description: |
+    Gold-standard KYC API spec used by AdaptConfig smoke tests.
+    Contains three endpoints (Aadhaar verify, PAN verify, status check)
+    so a "smoke" simulation produces exactly 7 test steps:
+    config-structure, field-mappings, 3 endpoint tests, auth, hooks = 7.
+
+servers:
+  - url: https://api.adaptconfig.example.com/v1
+
+security:
+  - ApiKey: []
+
+paths:
+  /verify/aadhaar:
+    post:
+      summary: Verify Aadhaar number
+      description: Match an applicant's name and date of birth against the Aadhaar database.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - aadhaar_number
+                - customer_name
+                - date_of_birth
+                - consent_id
+              properties:
+                aadhaar_number:
+                  type: string
+                  description: 12-digit Aadhaar number
+                  example: "123456789012"
+                customer_name:
+                  type: string
+                  description: Name as on Aadhaar card
+                  example: "Rahul Sharma"
+                date_of_birth:
+                  type: string
+                  format: date
+                  example: "1990-05-15"
+                mobile_number:
+                  type: string
+                  example: "9876543210"
+                consent_id:
+                  type: string
+                  description: Reference to recorded user consent
+                  example: "consent-2026-0001"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                    example: true
+                  name_match_score:
+                    type: number
+                    example: 0.95
+                  reference_id:
+                    type: string
+                    example: "KYC-AADHAAR-2026-001"
+
+  /verify/pan:
+    post:
+      summary: Verify PAN number
+      description: Verify a PAN card and resolve the holder's registered name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - pan_number
+                - customer_name
+                - consent_id
+              properties:
+                pan_number:
+                  type: string
+                  description: 10-character PAN
+                  example: "ABCDE1234F"
+                customer_name:
+                  type: string
+                  example: "Rahul Sharma"
+                date_of_birth:
+                  type: string
+                  format: date
+                  example: "1990-05-15"
+                consent_id:
+                  type: string
+                  example: "consent-2026-0001"
+      responses:
+        "200":
+          description: PAN verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                    example: true
+                  registered_name:
+                    type: string
+                    example: "RAHUL SHARMA"
+                  reference_id:
+                    type: string
+                    example: "KYC-PAN-2026-001"
+
+  /verify/status/{reference_id}:
+    get:
+      summary: Check verification status
+      description: Poll the status of an in-flight or completed verification by reference id.
+      parameters:
+        - in: path
+          name: reference_id
+          required: true
+          schema:
+            type: string
+          description: Reference id returned by /verify/aadhaar or /verify/pan
+      responses:
+        "200":
+          description: Verification status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference_id:
+                    type: string
+                    example: "KYC-AADHAAR-2026-001"
+                  status:
+                    type: string
+                    enum: [pending, verified, failed]
+                    example: "verified"
+                  completed_at:
+                    type: string
+                    format: date-time
+                    example: "2026-05-13T12:00:00Z"
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
