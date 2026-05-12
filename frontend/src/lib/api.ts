@@ -187,7 +187,9 @@ export const configurationsApi = {
     auto_map?: boolean;
   }) =>
     api
-      .post<APIResponse<Configuration>>("/api/v1/configurations/generate", params)
+      .post<APIResponse<Configuration>>("/api/v1/configurations/generate", params, {
+        timeout: 120_000, // LLM config generation can take longer than default 30s
+      })
       .then((r) => r.data),
   validate: (id: string) =>
     api

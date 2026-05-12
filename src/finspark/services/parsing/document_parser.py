@@ -273,11 +273,20 @@ Payments: Razorpay, Paytm, PhonePe, BillDesk, Cashfree, NPCI.
 
         try:
             prompt = _PROMPT.format(filename=filename, text=truncated)
+            # Use gpt-4.1-mini for parsing — fast and accurate for structured
+            # extraction. Reasoning models (gpt-5) are too slow (60s+).
+            from finspark.core.config import settings as _settings
+
+            parse_kwargs: dict[str, Any] = {}
+            if _settings.llm_provider == "openai":
+                parse_kwargs["model"] = "gpt-4.1-mini"
+
             llm_data: dict[str, Any] = await client.generate_json(
                 prompt,
                 system_instruction=_SYSTEM_INSTRUCTION,
                 temperature=0.1,
                 max_tokens=8192,
+                **parse_kwargs,
             )
 
             inferred_type = self._normalize_doc_type(llm_data.get("doc_type", "brd"))

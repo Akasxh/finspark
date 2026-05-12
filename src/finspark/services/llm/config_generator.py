@@ -156,17 +156,20 @@ async def generate_config_llm(
 
     logger.info("llm_config_generation_start adapter=%s", adapter_info.get("name", "unknown"))
 
-    # Use the reasoning model for config generation when on OpenRouter.
-    # GeminiClient doesn't accept a model kwarg, so only pass it when supported.
+    # Use a fast non-reasoning model for config generation — structured JSON
+    # doesn't need heavy reasoning, and gpt-5 is too slow (60s+).
+    # gpt-4.1-mini is fast (~3-5s) and excellent at structured JSON tasks.
     extra_kwargs: dict[str, Any] = {}
-    if settings.llm_provider == "openrouter" and settings.llm_model_reasoning:
+    if settings.llm_provider == "openai":
+        extra_kwargs["model"] = "gpt-4.1-mini"
+    elif settings.llm_provider == "openrouter" and settings.llm_model_reasoning:
         extra_kwargs["model"] = settings.llm_model_reasoning
 
     result = await client.generate_json(
         prompt,
         system_instruction=_SYSTEM_INSTRUCTION,
         temperature=0.1,
-        max_tokens=8192,
+        max_tokens=4096,
         **extra_kwargs,
     )
 
