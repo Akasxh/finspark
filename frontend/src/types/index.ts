@@ -248,6 +248,22 @@ export interface DeprecationInfo {
   migration_guide: Array<{ action: string; description: string }>;
 }
 
+export interface LintFinding {
+  code: string;
+  message: string;
+  severity: "error" | "warning" | "info" | "hint";
+  path: string;
+  range: string;
+}
+
+export interface LintReport {
+  findings: LintFinding[];
+  error_count: number;
+  warning_count: number;
+  info_count: number;
+  spectral_available: boolean;
+}
+
 export interface SearchResult {
   type: string;
   id: string;
@@ -262,4 +278,25 @@ export interface SearchResponse {
   adapters: SearchResult[];
   configurations: SearchResult[];
   simulations: SearchResult[];
+}
+
+// Security inspection types
+export interface SecurityFinding {
+  category: string;
+  severity: "critical" | "high" | "medium" | "low" | "info";
+  title: string;
+  description: string;
+  recommendation: string;
+  location: string;
+  source: "rule_based" | "llm";
+}
+
+export interface SecurityReport {
+  findings: SecurityFinding[];
+  summary: Record<string, number>;
+  overall_risk: "critical" | "high" | "medium" | "low" | "minimal";
+  scanned_at: string;
+  inspector_version: string;
+  llm_augmented: boolean;
+  notes: string[];
 }

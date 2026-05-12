@@ -21,9 +21,12 @@ from finspark.api.routes import (
     documents,
     external_audit,
     health,
+    lint,
+    metrics as metrics_route,
     observability,
     proxy,
     search,
+    security,
     simulations,
     webhooks,
     workflows,
@@ -33,10 +36,11 @@ from finspark.core.database import init_db
 from finspark.core.logging_filter import PIIMaskingFilter
 from finspark.core.middleware import (
     DeprecationHeaderMiddleware,
+    RequestBodySizeLimitMiddleware,
     RequestLoggingMiddleware,
     TenantMiddleware,
 )
-from finspark.core.rate_limiter import RateLimiterMiddleware, metrics
+from finspark.core.rate_limiter import RateLimiterMiddleware
 from finspark.seeds import seed_adapters, seed_admin_user
 
 logger = logging.getLogger(__name__)
@@ -137,6 +141,7 @@ app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(DeprecationHeaderMiddleware)
 app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(TenantMiddleware)
+app.add_middleware(RequestBodySizeLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -164,7 +169,10 @@ app.include_router(external_audit.router, prefix="/api/v1")
 app.include_router(observability.router, prefix="/api/v1")
 app.include_router(proxy.router, prefix="/api/v1")
 app.include_router(contract_testing.router, prefix="/api/v1")
+app.include_router(lint.router, prefix="/api/v1")
+app.include_router(security.router, prefix="/api/v1")
 app.include_router(workflows.router, prefix="/api/v1")
+app.include_router(metrics_route.router)  # /metrics — requires admin role
 app.include_router(analytics.router)
 
 
@@ -174,9 +182,3 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     return a generic 500 to avoid leaking stack traces to clients."""
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
-
-
-@app.get("/metrics")
-async def get_metrics() -> dict:
-    """Return in-memory API metrics."""
-    return await metrics.snapshot()

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -56,9 +57,28 @@ async def seed_adapters() -> None:
 
 
 async def seed_admin_user() -> None:
-    """Create the default admin user if no users exist."""
+    """Create the default admin user if no users exist.
+
+    Requires ``FINSPARK_ADMIN_PASSWORD`` env var to be set.
+    In non-debug mode the application will fail fast if the variable is missing
+    or empty, preventing accidental deployment with hardcoded credentials.
+    """
     from finspark.api.routes.auth import _hash_password
+    from finspark.core.config import settings
     from finspark.models.user import User
+
+    admin_password = os.environ.get("FINSPARK_ADMIN_PASSWORD", "")
+
+    if not admin_password:
+        if not settings.debug:
+            raise RuntimeError(
+                "FINSPARK_ADMIN_PASSWORD environment variable is required in "
+                "non-debug mode. Set it before starting the application."
+            )
+        logger.warning(
+            "FINSPARK_ADMIN_PASSWORD not set; skipping admin user seed in debug mode"
+        )
+        return
 
     async with async_session_factory() as db:
         result = await db.execute(select(User).limit(1))
@@ -68,10 +88,10 @@ async def seed_admin_user() -> None:
         admin = User(
             email="admin@finspark.dev",
             name="Admin",
-            password_hash=_hash_password("Admin1234!"),
+            password_hash=_hash_password(admin_password),
             role="admin",
             tenant_id="default",
         )
         db.add(admin)
         await db.commit()
-        logger.info("Created default admin user: admin@finspark.dev / Admin1234!")
+        logger.info("Created default admin user: admin@finspark.dev")

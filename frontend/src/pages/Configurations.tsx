@@ -1,5 +1,5 @@
 import { useToast } from "@/components/Toast";
-import { adaptersApi, configurationsApi, documentsApi, simulationsApi } from "@/lib/api";
+import { adaptersApi, configurationsApi, documentsApi, securityApi, simulationsApi } from "@/lib/api";
 import type {
   Adapter,
   AdapterEndpoint,
@@ -10,6 +10,8 @@ import type {
   ConfigValidationResult,
   Configuration,
   FieldMapping,
+  SecurityFinding,
+  SecurityReport,
 } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -1354,6 +1356,8 @@ export default function Configurations() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showCompare, setShowCompare] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Configuration | null>(null);
+  const [securityReport, setSecurityReport] = useState<SecurityReport | null>(null);
+  const [securityConfigName, setSecurityConfigName] = useState("");
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["configurations"],
@@ -1437,6 +1441,14 @@ export default function Configurations() {
       }
     },
     onError: () => { toast("Batch validate failed.", "error"); },
+  });
+
+  const securityMutation = useMutation({
+    mutationFn: (configId: string) => securityApi.inspectConfig(configId),
+    onSuccess: (resp) => {
+      if (resp.data) setSecurityReport(resp.data);
+    },
+    onError: () => { toast("Security inspection failed.", "error"); },
   });
 
   const configs: Configuration[] = data?.data ?? [];
@@ -1592,6 +1604,21 @@ export default function Configurations() {
                     <button
                       type="button"
                       className="btn-secondary"
+                      style={{ fontSize: 11, padding: "5px 10px" }}
+                      disabled={securityMutation.isPending}
+                      onClick={() => {
+                        setSecurityConfigName(cfg.name);
+                        securityMutation.mutate(cfg.id);
+                      }}
+                    >
+                      {securityMutation.isPending && securityConfigName === cfg.name
+                        ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
+                        : <ShieldCheck style={{ width: 12, height: 12 }} />}
+                      Security
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
                       style={{ fontSize: 11, padding: "5px 8px", color: "var(--color-error-text)" }}
                       onClick={() => setConfirmDelete(cfg)}
                       aria-label={`Delete ${cfg.name}`}
@@ -1678,6 +1705,150 @@ export default function Configurations() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Security report modal */}
+      {securityReport && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 50,
+            background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 24,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setSecurityReport(null); }}
+        >
+          <div className="card" style={{ padding: 24, maxWidth: 680, width: "100%", maxHeight: "85vh", overflow: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text-primary)", marginBottom: 4 }}>
+                  Security Report
+                </h3>
+                <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                  {securityConfigName} &middot; {securityReport.findings.length} finding(s) &middot; Risk: <span style={{
+                    fontWeight: 700,
+                    color: securityReport.overall_risk === "critical" ? "var(--color-error-text)"
+                      : securityReport.overall_risk === "high" ? "#f97316"
+                      : securityReport.overall_risk === "medium" ? "#eab308"
+                      : securityReport.overall_risk === "low" ? "var(--color-brand-light)"
+                      : "var(--color-success-text)",
+                  }}>{securityReport.overall_risk.toUpperCase()}</span>
+                  {securityReport.llm_augmented && <span style={{ marginLeft: 8, fontSize: 11, color: "var(--color-teal)" }}>(AI-augmented)</span>}
+                </p>
+              </div>
+              <button type="button" className="btn-secondary" style={{ padding: "4px 8px" }} onClick={() => setSecurityReport(null)}>
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+
+            {/* Severity summary bar */}
+            {Object.keys(securityReport.summary).length > 0 && (
+              <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                {(["critical", "high", "medium", "low", "info"] as const).map((sev) => {
+                  const count = securityReport.summary[sev] ?? 0;
+                  if (count === 0) return null;
+                  const colors: Record<string, string> = {
+                    critical: "rgba(220,38,38,0.15)",
+                    high: "rgba(249,115,22,0.15)",
+                    medium: "rgba(234,179,8,0.15)",
+                    low: "rgba(59,130,246,0.15)",
+                    info: "rgba(107,114,128,0.15)",
+                  };
+                  const textColors: Record<string, string> = {
+                    critical: "var(--color-error-text)",
+                    high: "#f97316",
+                    medium: "#eab308",
+                    low: "var(--color-brand-light)",
+                    info: "var(--color-text-muted)",
+                  };
+                  return (
+                    <div key={sev} style={{
+                      padding: "4px 10px", borderRadius: 6,
+                      background: colors[sev], color: textColors[sev],
+                      fontSize: 12, fontWeight: 600,
+                    }}>
+                      {count} {sev}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Findings list */}
+            {securityReport.findings.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 32, color: "var(--color-text-muted)" }}>
+                <ShieldCheck style={{ width: 32, height: 32, margin: "0 auto 8px", color: "var(--color-success-text)" }} />
+                <p style={{ fontSize: 14, fontWeight: 600, color: "var(--color-success-text)" }}>No security issues found</p>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {securityReport.findings.map((f: SecurityFinding, i: number) => {
+                  const borderColors: Record<string, string> = {
+                    critical: "rgba(220,38,38,0.4)",
+                    high: "rgba(249,115,22,0.4)",
+                    medium: "rgba(234,179,8,0.4)",
+                    low: "rgba(59,130,246,0.4)",
+                    info: "rgba(107,114,128,0.3)",
+                  };
+                  const bgColors: Record<string, string> = {
+                    critical: "rgba(220,38,38,0.06)",
+                    high: "rgba(249,115,22,0.06)",
+                    medium: "rgba(234,179,8,0.06)",
+                    low: "rgba(59,130,246,0.06)",
+                    info: "rgba(107,114,128,0.04)",
+                  };
+                  const sevTextColors: Record<string, string> = {
+                    critical: "var(--color-error-text)",
+                    high: "#f97316",
+                    medium: "#eab308",
+                    low: "var(--color-brand-light)",
+                    info: "var(--color-text-muted)",
+                  };
+                  return (
+                    <div key={i} style={{
+                      padding: "12px 14px", borderRadius: 8,
+                      border: `1px solid ${borderColors[f.severity] || "var(--color-border)"}`,
+                      background: bgColors[f.severity] || "transparent",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                          padding: "2px 6px", borderRadius: 4,
+                          background: borderColors[f.severity], color: sevTextColors[f.severity],
+                        }}>
+                          {f.severity}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)" }}>
+                          {f.title}
+                        </span>
+                        {f.source === "llm" && (
+                          <span style={{ fontSize: 10, color: "var(--color-teal)", fontWeight: 500 }}>AI</span>
+                        )}
+                      </div>
+                      <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 6, lineHeight: 1.5 }}>
+                        {f.description}
+                      </p>
+                      <p style={{ fontSize: 12, color: "var(--color-teal)", lineHeight: 1.5 }}>
+                        <strong>Fix:</strong> {f.recommendation}
+                      </p>
+                      {f.location && (
+                        <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 4 }} className="mono">
+                          {f.location}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Notes */}
+            {securityReport.notes.length > 0 && (
+              <div style={{ marginTop: 12, fontSize: 11, color: "var(--color-text-muted)", fontStyle: "italic" }}>
+                {securityReport.notes.map((n, i) => <p key={i}>{n}</p>)}
+              </div>
+            )}
           </div>
         </div>
       )}

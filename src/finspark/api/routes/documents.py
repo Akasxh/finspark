@@ -27,6 +27,7 @@ from finspark.schemas.documents import (
     DocumentUploadResponse,
     ParsedDocumentResult,
 )
+from finspark.services.lint.spectral_linter import lint_openapi_spec
 from finspark.services.parsing.document_parser import DocumentParser
 from finspark.services.webhook_delivery import deliver_event
 
@@ -132,6 +133,14 @@ async def upload_document(
 
         if result is None:
             result = await asyncio.to_thread(parser.parse, file_path, doc_type=doc_type)
+
+        # Run Spectral linting on API specs (yaml/yml/json with openapi/swagger key)
+        if raw_text and suffix.lstrip(".") in ("yaml", "yml", "json"):
+            try:
+                lint_report = await lint_openapi_spec(raw_text, format=suffix.lstrip("."))
+                result.lint_report = lint_report
+            except Exception:
+                logger.warning("Spectral linting failed for %s, continuing without lint", safe_name, exc_info=True)
 
         doc.parsed_result = result.model_dump_json()
         doc.raw_text = result.summary[:5000]

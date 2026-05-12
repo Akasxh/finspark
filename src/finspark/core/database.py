@@ -6,10 +6,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from finspark.core.config import settings
 
+_pool_kwargs: dict = {}
+# SQLite doesn't support pool_size/max_overflow/pool_timeout; only add for
+# other backends (e.g. PostgreSQL, MySQL).
+if not settings.database_url.startswith("sqlite"):
+    _pool_kwargs = {
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_timeout": 30,
+        "pool_pre_ping": True,
+    }
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     future=True,
+    **_pool_kwargs,
 )
 
 async_session_factory = async_sessionmaker(

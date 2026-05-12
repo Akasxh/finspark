@@ -741,12 +741,28 @@ async def update_configuration(
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
 
+    previous_value = config.full_config
+
     if body.name is not None:
         config.name = body.name
     if body.field_mappings is not None:
         config.field_mappings = json.dumps([fm.model_dump() for fm in body.field_mappings])
     if body.notes is not None:
         config.notes = body.notes
+
+    # Increment version and create history entry for the update
+    config.version += 1
+
+    history = ConfigurationHistory(
+        tenant_id=tenant.tenant_id,
+        configuration_id=config.id,
+        version=config.version,
+        change_type="update",
+        previous_value=previous_value,
+        new_value=config.full_config,
+        changed_by=tenant.tenant_name,
+    )
+    db.add(history)
 
     await db.flush()
     await db.refresh(config)
@@ -756,7 +772,7 @@ async def update_configuration(
         action="update",
         resource_type="configuration",
         resource_id=config_id,
-        details={"updated_fields": [k for k, v in body.model_dump().items() if v is not None]},
+        details={"updated_fields": [k for k, v in body.model_dump().items() if v is not None], "version": config.version},
     )
 
     return APIResponse(success=True, data=_serialize_config(config), message="Configuration updated")
