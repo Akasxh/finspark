@@ -847,6 +847,94 @@ async def validate_configuration(
     return APIResponse(data=_validate_config(full_config))
 
 
+# ── Composite pipeline: transition -> validate -> transition -> smoke ─────────
+
+
+_PIPELINE_ORDER: list[ConfigStatus] = [
+    ConfigStatus.DRAFT,
+    ConfigStatus.CONFIGURED,
+    ConfigStatus.VALIDATING,
+    ConfigStatus.TESTING,
+    ConfigStatus.ACTIVE,
+]
+
+
+def _state_index(state: ConfigStatus) -> int:
+    """Return the canonical pipeline index for *state*. Off-graph states
+    (deprecated, rollback) get -1 so they always trigger a real transition."""
+    try:
+        return _PIPELINE_ORDER.index(state)
+    except ValueError:
+        return -1
+
+
+async def _advance_state(
+    config: Configuration,
+    target: ConfigStatus,
+    reason: str | None,
+    db: AsyncSession,
+    audit: AuditService,
+    tenant: TenantContext,
+) -> PipelineStepResult:
+    """Move *config* one step closer to *target* if a transition is allowed.
+
+    Idempotency: when the config is already AT or PAST the target on the
+    canonical happy-path (draft → configured → validating → testing → active),
+    the step is reported as ``skipped`` so callers can replay the pipeline
+    without surfacing spurious lifecycle errors.
+    """
+    current = ConfigStatus(config.status)
+    if current == target or _state_index(current) > _state_index(target) >= 0:
+        return PipelineStepResult(
+            name=f"transition_to_{target.value}",
+            status="skipped",
+            details={"from": current.value, "to": target.value, "note": "already at or past target"},
+        )
+
+    lifecycle = IntegrationLifecycle(state=current)
+    try:
+        entry = lifecycle.transition(target, actor=tenant.tenant_name, reason=reason)
+    except InvalidTransitionError as exc:
+        return PipelineStepResult(
+            name=f"transition_to_{target.value}",
+            status="failed",
+            details={"from": current.value, "to": target.value},
+            error=str(exc),
+        )
+
+    config.status = target.value
+    history = ConfigurationHistory(
+        tenant_id=tenant.tenant_id,
+        configuration_id=config.id,
+        version=config.version,
+        change_type="status_change",
+        previous_value=current.value,
+        new_value=target.value,
+        changed_by=tenant.tenant_name,
+    )
+    db.add(history)
+
+    await audit.log(
+        tenant_id=tenant.tenant_id,
+        actor=tenant.tenant_name,
+        action="transition",
+        resource_type="configuration",
+        resource_id=config.id,
+        details={
+            "from_state": entry.from_state.value,
+            "to_state": entry.to_state.value,
+            "reason": reason,
+            "via": "validate-and-test",
+        },
+    )
+
+    return PipelineStepResult(
+        name=f"transition_to_{target.value}",
+        status="passed",
+        details={"from": current.value, "to": target.value},
+    )
+
+
 @router.post(
     "/{config_id}/validate-and-test",
     response_model=APIResponse[ValidateAndTestResponse],

@@ -410,15 +410,6 @@ REQUIRED_ROUTES: list[tuple[str, str, str]] = [
     ("GET", "/api/v1/search/", "Search page – global search"),
     # Audit
     ("GET", "/api/v1/audit/", "Audit page – list with filters"),
-    # Security inspector (used by Configurations security button)
-    ("POST", "/api/v1/security/inspect-spec", "Documents page – security inspect"),
-    (
-        "POST",
-        "/api/v1/security/inspect-config/{config_id}",
-        "Configurations page – Security button",
-    ),
-    # Lint (used by uploaded specs panel)
-    ("POST", "/api/v1/lint/", "Documents page – ad-hoc lint"),
     # Health
     ("GET", "/health", "Header health indicator"),
 ]
