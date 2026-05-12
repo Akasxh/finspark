@@ -149,16 +149,32 @@ class GeminiClient:
 # ---------------------------------------------------------------------------
 # Module-level shared client (created lazily, closed by app lifespan)
 # ---------------------------------------------------------------------------
-_shared_client: GeminiClient | None = None
+# Note: typed as ``Any`` because the actual instance may be either
+# ``GeminiClient`` or ``OpenAIClient`` depending on ``settings.llm_provider``.
+# Both expose the same ``generate`` / ``generate_json`` / ``close`` surface.
+_shared_client: Any | None = None
 
 
-def get_llm_client() -> GeminiClient:
-    """Return (or lazily create) the module-level shared GeminiClient.
+def get_llm_client() -> Any:
+    """Return (or lazily create) the module-level shared LLM client.
 
-    The lifespan handler in main.py calls ``_shared_client.close()`` on shutdown
-    so the httpx connection pool is released cleanly.
+    Dispatches on ``settings.llm_provider``:
+
+    * ``"openai"`` → :class:`finspark.services.llm.openai_client.OpenAIClient`
+    * anything else (default) → :class:`GeminiClient`
+
+    The lifespan handler in ``main.py`` calls ``_shared_client.close()`` on
+    shutdown so the httpx connection pool is released cleanly regardless of
+    which provider is active.
     """
     global _shared_client  # noqa: PLW0603
     if _shared_client is None:
-        _shared_client = GeminiClient()
+        from finspark.core.config import settings as _s  # local import: avoid cycle
+
+        if (_s.llm_provider or "").lower() == "openai":
+            from finspark.services.llm.openai_client import OpenAIClient  # noqa: PLC0415
+
+            _shared_client = OpenAIClient()
+        else:
+            _shared_client = GeminiClient()
     return _shared_client

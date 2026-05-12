@@ -28,7 +28,6 @@ import {
   RotateCcw,
   Save,
   Settings,
-  ShieldCheck,
   Sparkles,
   Trash2,
   X,
@@ -1453,21 +1452,6 @@ export default function Configurations() {
     },
   });
 
-  const batchValidateMutation = useMutation({
-    mutationFn: (configIds: string[]) => configurationsApi.batchValidate(configIds),
-    onSuccess: (resp) => {
-      const d = resp.data as Record<string, unknown> | null;
-      if (d && typeof d === "object") {
-        const valid = (d.valid_count as number | undefined) ?? (d.valid as unknown[])?.length ?? "?";
-        const invalid = (d.invalid_count as number | undefined) ?? (d.invalid as unknown[])?.length ?? "?";
-        toast(`Batch validate complete: ${valid} valid, ${invalid} invalid.`, "success");
-      } else {
-        toast("Batch validate complete.", "success");
-      }
-    },
-    onError: () => { toast("Batch validate failed.", "error"); },
-  });
-
   const configs: Configuration[] = data?.data ?? [];
 
   return (
@@ -1475,11 +1459,6 @@ export default function Configurations() {
       {/* Compare modal */}
       {showCompare && configs.length >= 2 && (
         <CompareModal configs={configs} onClose={() => setShowCompare(false)} />
-      )}
-
-      {/* Live pipeline progress (one-click validate + smoke) */}
-      {pipeline && (
-        <ValidationPipelinePanel ui={pipeline} onClose={() => setPipeline(null)} />
       )}
 
       {/* Header */}
@@ -1498,19 +1477,6 @@ export default function Configurations() {
               onClick={() => setShowCompare(true)}
             >
               <GitCompare style={{ width: 14, height: 14 }} /> Compare
-            </button>
-          )}
-          {configs.length > 0 && (
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={batchValidateMutation.isPending}
-              onClick={() => batchValidateMutation.mutate(configs.map((c) => c.id))}
-            >
-              {batchValidateMutation.isPending
-                ? <><Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> Validating…</>
-                : <><ShieldCheck style={{ width: 14, height: 14 }} /> Validate All</>
-              }
             </button>
           )}
           <button
@@ -1635,6 +1601,13 @@ export default function Configurations() {
                     transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 150ms ease",
                   }} />
                 </button>
+
+                {/* Inline pipeline progress — only renders for the config that ran it */}
+                {pipeline && pipeline.configId === cfg.id && (
+                  <div style={{ padding: "12px 18px", borderTop: "1px solid var(--color-border)" }}>
+                    <ValidationPipelinePanel ui={pipeline} onClose={() => setPipeline(null)} />
+                  </div>
+                )}
 
                 {/* Simulation results after transitioning to testing */}
                 {lastSimResult && lastSimResult.configId === cfg.id && (

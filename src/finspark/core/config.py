@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3-flash-preview"
     ai_enabled: bool = False
 
+    # Provider switch: "openai" | "gemini" (default "gemini" for backwards-compat).
+    # llm_model overrides the provider's default model (e.g. "gpt-4.1-nano").
+    llm_provider: str = "gemini"
+    llm_model: str = ""
+
     model_config = {"env_prefix": "FINSPARK_", "env_file": ".env", "extra": "ignore"}
 
     @model_validator(mode="after")
