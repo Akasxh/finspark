@@ -434,7 +434,10 @@ Return ONLY the JSON. No markdown fences. No prose outside the JSON."""
         try:
             from finspark.core.config import settings as _settings  # noqa: PLC0415
             extra: dict[str, Any] = {}
-            if _settings.llm_provider == "openrouter" and _settings.llm_model_reasoning:
+            # Use the configured reasoning model when available — the audit
+            # benefits from a calibrated judge. Falls back silently when the
+            # provider does not expose a separate reasoning model.
+            if _settings.llm_provider in {"openrouter", "openai"} and _settings.llm_model_reasoning:
                 extra["model"] = _settings.llm_model_reasoning
             data = await client.generate_json(
                 prompt,
@@ -656,10 +659,47 @@ Return ONLY the JSON. No markdown fences. No prose outside the JSON."""
 
     @staticmethod
     def _build_sample_request(config: dict[str, Any]) -> dict[str, Any]:
-        """Build a sample request from field mappings."""
+        """Build a sample request from field mappings.
+
+        For each mapping, the sample value is keyed on ``source_field`` (the
+        existing contract). When the mapping specifies a non-empty
+        ``transformation_expr``, the value is run through the safe DSL
+        :func:`apply_transformation`; otherwise we fall back to the legacy
+        enum-based ``transformation`` lookup (if any). Any DSL failure leaves
+        the original value untouched so the simulation can still proceed.
+        """
+        from finspark.services.transformation import (
+            DSLError,
+            apply_transformation,
+        )
+        from finspark.services.transformation.builtins import BUILTIN_TRANSFORMS
+
         request: dict[str, Any] = {}
         for mapping in config.get("field_mappings", []):
             source = mapping.get("source_field", "")
-            if source:
-                request[source] = MockAPIServer.MOCK_DATA.get(source, f"sample_{source}")
+            if not source:
+                continue
+            value: Any = MockAPIServer.MOCK_DATA.get(source, f"sample_{source}")
+
+            expr = (mapping.get("transformation_expr") or "").strip()
+            transform_name = mapping.get("transformation")
+
+            if expr:
+                try:
+                    value = apply_transformation(value, expr)
+                except DSLError as exc:
+                    logger.info(
+                        "transformation_expr_failed source=%s expr=%r error=%s",
+                        source, expr, exc,
+                    )
+            elif transform_name and transform_name in BUILTIN_TRANSFORMS:
+                try:
+                    value = BUILTIN_TRANSFORMS[transform_name](value)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.info(
+                        "transformation_legacy_failed source=%s name=%s error=%s",
+                        source, transform_name, exc,
+                    )
+
+            request[source] = value
         return request

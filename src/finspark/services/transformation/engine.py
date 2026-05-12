@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from finspark.services.transformation.builtins import BUILTIN_TRANSFORMS
-from finspark.services.transformation.sandbox import ExpressionSandbox
+from finspark.services.transformation.dsl import apply_transformation
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,9 @@ class TransformationEngine:
     """Applies field-level transformations to source payloads."""
 
     def __init__(self) -> None:
-        self._sandbox = ExpressionSandbox()
+        # Kept for backward compatibility — instance state is no longer needed
+        # because the DSL is a pure function.
+        pass
 
     def transform(
         self,
@@ -62,9 +64,9 @@ class TransformationEngine:
 
     def transform_value(self, value: Any, transform_name: str, **kwargs: Any) -> Any:
         if transform_name == "custom":
-            expression = kwargs.get("expression", "")
-            context = kwargs.get("context")
-            return self._sandbox.evaluate(expression, value, context)
+            expression = kwargs.get("expression", "") or ""
+            # The new DSL is pure; the previous ``context`` parameter is dropped.
+            return apply_transformation(value, expression)
 
         if transform_name not in BUILTIN_TRANSFORMS:
             raise ValueError(f"Unknown transform: {transform_name!r}")
@@ -119,8 +121,11 @@ class TransformationEngine:
         try:
             kwargs: dict[str, Any] = {}
             if transform_name == "custom":
-                kwargs["expression"] = mapping.get("custom_expression", "value")
-                kwargs["context"] = source_payload
+                # The new DSL ignores ``context``; we keep the expression key.
+                kwargs["expression"] = mapping.get(
+                    "custom_expression",
+                    mapping.get("transformation_expr", ""),
+                ) or ""
             transformed = self.transform_value(original, transform_name, **kwargs)
             return FieldResult(
                 source_field=source_field,

@@ -86,6 +86,8 @@ export interface FieldMapping {
   source_field: string;
   target_field: string;
   transformation?: string;
+  /** Optional pipe-chained DSL expression. Takes precedence over `transformation` when non-empty. */
+  transformation_expr?: string | null;
   confidence: number;
   is_confirmed: boolean;
 }

@@ -97,6 +97,43 @@ const TRANSFORM_OPTIONS = [
   "normalize_phone", "validate_email", "to_string", "format_date", "parse_boolean",
 ];
 
+/**
+ * Allow-listed DSL calls — must stay in sync with
+ * `src/finspark/services/transformation/dsl.py` :: `ALLOWED_CALLS`.
+ */
+const ALLOWED_DSL_CALLS = new Set([
+  "int", "float", "str", "upper", "lower",
+  "strip", "clamp", "parse_date", "parse_bool",
+]);
+
+/**
+ * Lightweight client-side validator for `transformation_expr`. The server is
+ * authoritative; this just renders the input red inline. We tokenise the
+ * expression with a small regex pipeline and check each call name is allowed.
+ * No `eval`/`Function`/dynamic execution.
+ */
+function validateTransformationExpr(raw: string): { ok: boolean; error?: string } {
+  const expr = raw.trim();
+  if (!expr) return { ok: true };
+  // Disallow characters outside the DSL alphabet.
+  if (/[^A-Za-z0-9_|(),\s"'\-.%]/.test(expr)) {
+    return { ok: false, error: "Only allow-listed calls chained with '|' are permitted." };
+  }
+  const steps = expr.split("|").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (steps.length === 0) return { ok: true };
+  for (const step of steps) {
+    const m = step.match(/^([A-Za-z_][A-Za-z0-9_]*)(\s*\(.*\))?$/);
+    if (!m) {
+      return { ok: false, error: `Invalid step: '${step}'.` };
+    }
+    const name = m[1];
+    if (!ALLOWED_DSL_CALLS.has(name)) {
+      return { ok: false, error: `Unknown transformation '${name}'.` };
+    }
+  }
+  return { ok: true };
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtDate(s: string) {
@@ -338,6 +375,40 @@ function HistoryPanel({ configId, currentVersion }: { configId: string; currentV
   );
 }
 
+function CustomExprInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const validation = validateTransformationExpr(value);
+  const invalid = !validation.ok;
+  const borderColor = invalid ? "#ef4444" : "var(--color-border-strong)";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <input
+        type="text"
+        value={value}
+        placeholder='e.g. int | clamp(0, 1000000)'
+        spellCheck={false}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: "100%", borderRadius: 4, border: `1px solid ${borderColor}`,
+          background: "var(--color-bg-raised)", padding: "4px 8px",
+          fontFamily: "monospace", fontSize: 12, color: "var(--color-text-primary)",
+          outline: "none", boxSizing: "border-box",
+        }}
+        onFocus={(e) => {
+          if (!invalid) e.currentTarget.style.borderColor = "var(--color-brand-light)";
+        }}
+        onBlur={(e) => {
+          e.currentTarget.style.borderColor = invalid ? "#ef4444" : "var(--color-border-strong)";
+        }}
+      />
+      {invalid && validation.error && (
+        <span style={{ fontSize: 10, color: "#ef4444", fontFamily: "monospace" }}>
+          {validation.error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function MappingsTable({ cfg }: { cfg: Configuration }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -369,6 +440,15 @@ function MappingsTable({ cfg }: { cfg: Configuration }) {
     setIsDirty(true);
   };
 
+  const updateExpr = (idx: number, value: string) => {
+    setMappings((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], transformation_expr: value === "" ? null : value };
+      return next;
+    });
+    setIsDirty(true);
+  };
+
   if (mappings.length === 0) {
     return <p style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No field mappings configured.</p>;
   }
@@ -396,7 +476,7 @@ function MappingsTable({ cfg }: { cfg: Configuration }) {
         <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-bg-base)" }}>
-              {["Source", "→", "Target", "Confidence", "Transform"].map((h) => (
+              {["Source", "→", "Target", "Confidence", "Transform", "Custom expr"].map((h) => (
                 <th key={h} style={{ padding: "8px 12px", textAlign: h === "→" ? "center" : "left", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)" }}>
                   {h}
                 </th>
@@ -446,6 +526,12 @@ function MappingsTable({ cfg }: { cfg: Configuration }) {
                   >
                     {TRANSFORM_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
+                </td>
+                <td style={{ padding: "8px 12px", minWidth: 220 }}>
+                  <CustomExprInput
+                    value={fm.transformation_expr ?? ""}
+                    onChange={(v) => updateExpr(i, v)}
+                  />
                 </td>
               </tr>
             ))}

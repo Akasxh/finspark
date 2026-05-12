@@ -34,6 +34,10 @@ class FieldMapping(BaseModel):
     source_field: str
     target_field: str
     transformation: str | None = None  # e.g., "uppercase", "date_format", "split"
+    # Optional pipe-chained DSL expression evaluated by
+    # :func:`finspark.services.transformation.apply_transformation`. When set
+    # and non-empty it takes precedence over ``transformation`` at runtime.
+    transformation_expr: str | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     is_confirmed: bool = False
 
