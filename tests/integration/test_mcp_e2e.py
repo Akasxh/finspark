@@ -46,7 +46,10 @@ class TestToolDiscovery:
                 "simulate_config",
                 "search_adapters",
                 "list_adapters",
+                "list_adapters_summary",
                 "get_capabilities",
+                "generate_config",
+                "invoke",
             }
             assert expected.issubset(tool_names)
 
@@ -85,13 +88,13 @@ class TestGetCapabilitiesE2E:
         await _run_with_client(_test)
 
 
-class TestListAdaptersE2E:
-    """Invoke list_adapters via MCP protocol."""
+class TestListAdaptersSummaryE2E:
+    """Invoke the legacy seed-JSON `list_adapters_summary` via MCP protocol."""
 
     @pytest.mark.asyncio
     async def test_invoke(self):
         async def _test(client):
-            result = await client.call_tool("list_adapters", {})
+            result = await client.call_tool("list_adapters_summary", {})
             data = _parse_tool_result(result)
             assert isinstance(data, list)
             assert len(data) > 0

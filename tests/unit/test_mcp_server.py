@@ -39,22 +39,25 @@ class TestServerConstruction:
             "simulate_config",
             "search_adapters",
             "list_adapters",
+            "list_adapters_summary",
             "get_capabilities",
+            "generate_config",
+            "invoke",
         }
         assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 
 
-class TestListAdapters:
-    """Test the list_adapters tool."""
+class TestListAdaptersSummary:
+    """Test the legacy seed-JSON `list_adapters_summary` tool."""
 
     def test_returns_non_empty_list(self, mcp_server):
-        tool_fn = mcp_server._tool_manager._tools["list_adapters"].fn
+        tool_fn = mcp_server._tool_manager._tools["list_adapters_summary"].fn
         result = json.loads(tool_fn())
         assert isinstance(result, list)
         assert len(result) > 0
 
     def test_adapter_has_required_fields(self, mcp_server):
-        tool_fn = mcp_server._tool_manager._tools["list_adapters"].fn
+        tool_fn = mcp_server._tool_manager._tools["list_adapters_summary"].fn
         result = json.loads(tool_fn())
         for adapter in result:
             assert "name" in adapter
@@ -107,11 +110,12 @@ class TestGetCapabilities:
         assert result["version"] == "0.1.0"
         assert "tools" in result
         assert isinstance(result["tools"], list)
-        assert len(result["tools"]) == 6
+        # 6 legacy tools + 3 new bridge tools (issue #114)
+        assert len(result["tools"]) == 9
 
     def test_adapter_count_matches_catalog(self, mcp_server):
         tool_fn_caps = mcp_server._tool_manager._tools["get_capabilities"].fn
-        tool_fn_list = mcp_server._tool_manager._tools["list_adapters"].fn
+        tool_fn_list = mcp_server._tool_manager._tools["list_adapters_summary"].fn
         caps = tool_fn_caps()
         adapters = json.loads(tool_fn_list())
         assert caps["adapter_count"] == len(adapters)
@@ -121,7 +125,7 @@ class TestGetCapabilities:
         result = tool_fn()
         assert "simulate_config" in result["offline_capable"]
         assert "search_adapters" in result["offline_capable"]
-        assert "list_adapters" in result["offline_capable"]
+        assert "list_adapters_summary" in result["offline_capable"]
 
 
 class TestSimulateConfig:

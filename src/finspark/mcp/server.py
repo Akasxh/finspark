@@ -193,16 +193,18 @@ def build_server() -> FastMCP:
         return json.dumps(results, indent=2)
 
     # ------------------------------------------------------------------
-    # Tool: list_adapters
+    # Tool: list_adapters_summary (legacy seed-JSON view; the canonical
+    # `list_adapters` below returns DB-backed rows including stable ids).
     # ------------------------------------------------------------------
     @mcp.tool(
-        name="list_adapters",
+        name="list_adapters_summary",
         description=(
-            "List all available integration adapters in the catalog with their "
-            "name, category, auth types, and version count."
+            "Return a seed-JSON-backed summary of the adapter catalogue with "
+            "name, category, auth types, and version count. Offline-capable. "
+            "For stable ids and DB-synchronised data, prefer `list_adapters`."
         ),
     )
-    def list_adapters() -> str:
+    def list_adapters_summary() -> str:
         adapters = _load_seed_adapters()
         result: list[dict[str, Any]] = []
 
@@ -243,7 +245,10 @@ def build_server() -> FastMCP:
                 "simulate_config",
                 "search_adapters",
                 "list_adapters",
+                "list_adapters_summary",
                 "get_capabilities",
+                "generate_config",
+                "invoke",
             ],
             "adapter_count": len(adapters),
             "adapter_categories": categories,
@@ -251,9 +256,66 @@ def build_server() -> FastMCP:
             "offline_capable": [
                 "simulate_config",
                 "search_adapters",
-                "list_adapters",
+                "list_adapters_summary",
                 "get_capabilities",
             ],
         }
+
+    # ------------------------------------------------------------------
+    # Issue #114 bridge tools — persona-spec'd contract
+    # ------------------------------------------------------------------
+    # These three tools form the runtime API proxy / integration middleware
+    # surface. They reuse DocumentParser, ConfigGenerator, and the chain
+    # executor + mock responses directly via finspark.mcp.bridge — no HTTP
+    # round-trips back to the FastAPI server.
+    from finspark.mcp import bridge
+
+    @mcp.tool(
+        name="list_adapters",
+        description=(
+            "Return the adapter catalogue from the database with one row per "
+            "adapter: id, name, category, description, latest_version_id, and "
+            "latest_version. Use this output's `id` and `latest_version_id` "
+            "as stable references for downstream tools."
+        ),
+    )
+    async def list_adapters() -> list[dict[str, Any]]:
+        return await bridge.list_adapters_tool()
+
+    @mcp.tool(
+        name="generate_config",
+        description=(
+            "Parse a free-text API document, pick the best adapter (using an "
+            "optional hint like 'cibil' or 'razorpay'), generate a runnable "
+            "integration config via the rule-based ConfigGenerator, and "
+            "persist it. Returns a `config_id` that can be passed to `invoke`."
+        ),
+    )
+    async def generate_config(
+        document_text: str,
+        adapter_hint: str | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        return await bridge.generate_config_tool(
+            document_text=document_text,
+            adapter_hint=adapter_hint,
+            name=name,
+        )
+
+    @mcp.tool(
+        name="invoke",
+        description=(
+            "Execute a previously generated configuration against deterministic "
+            "mock responses via the chain executor. Pass the `config_id` returned "
+            "by `generate_config` and an optional payload that will be merged "
+            "into each endpoint's request body. Returns step-by-step chain "
+            "results and the final response."
+        ),
+    )
+    async def invoke(
+        config_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await bridge.invoke_tool(config_id=config_id, payload=payload)
 
     return mcp
