@@ -1,0 +1,211 @@
+openapi: 3.0.3
+info:
+  title: Cross-Border Currency Exchange API
+  version: "1.0.0"
+  description: |
+    Real-time and historical foreign exchange rates published by the European Central Bank,
+    served via Frankfurter (https://www.frankfurter.dev). Used in our lending platform for:
+      - Cross-border loan disbursement (e.g., USD principal to INR borrower account)
+      - NRE/NRO account conversions for diaspora customers
+      - Treasury hedging on multi-currency working capital lines
+      - Daily MTM revaluation of foreign-currency-denominated loans
+
+    No authentication required. Public, free, rate-limit-free production endpoint.
+    Verified live: USD->INR returns 95.64 today, 82.87 on 2024-01-15.
+
+servers:
+  - url: https://api.frankfurter.dev/v1
+    description: Production (live, no auth)
+
+paths:
+  /currencies:
+    get:
+      operationId: listSupportedCurrencies
+      summary: List supported currency codes
+      description: |
+        Returns the full set of ISO-4217 currency codes the service can convert between.
+        Use this as the first call in any new integration to validate that the
+        currency pair you intend to convert is supported.
+      responses:
+        '200':
+          description: Map of currency code to human-readable name
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+              examples:
+                supported:
+                  value:
+                    USD: "United States Dollar"
+                    INR: "Indian Rupee"
+                    EUR: "Euro"
+                    GBP: "British Pound"
+                    SGD: "Singapore Dollar"
+
+  /latest:
+    get:
+      operationId: getLatestExchangeRate
+      summary: Get the latest exchange rate for a currency pair
+      description: |
+        Returns the most recent published exchange rate. The European Central Bank
+        publishes rates once per business day around 16:00 CET. Use this for
+        same-day disbursement valuations.
+      parameters:
+        - name: base
+          in: query
+          required: true
+          description: Source (base) currency ISO-4217 code.
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+            example: "USD"
+        - name: symbols
+          in: query
+          required: false
+          description: Target currency ISO-4217 code(s), comma-separated. Omit to return rates against all supported currencies.
+          schema:
+            type: string
+            example: "INR"
+        - name: amount
+          in: query
+          required: false
+          description: Amount to convert. Default is 1.
+          schema:
+            type: number
+            minimum: 0
+            example: 1000
+      responses:
+        '200':
+          description: Latest rate result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [amount, base, date, rates]
+                properties:
+                  amount:
+                    type: number
+                    description: The amount that was converted.
+                  base:
+                    type: string
+                    description: The source currency code echoed back.
+                  date:
+                    type: string
+                    format: date
+                    description: Date the ECB published this rate (YYYY-MM-DD).
+                  rates:
+                    type: object
+                    description: Map of target_currency to converted_amount.
+                    additionalProperties:
+                      type: number
+              examples:
+                usd_to_inr:
+                  value:
+                    amount: 1000
+                    base: "USD"
+                    date: "2026-05-12"
+                    rates:
+                      INR: 95637
+
+  /{date}:
+    get:
+      operationId: getHistoricalExchangeRate
+      summary: Get the historical exchange rate on a specific date
+      description: |
+        Returns the published rate on a specific past date. Used for back-valuing
+        disbursements that crossed quarter-end, MTM revaluations, and audit
+        reconstruction of legacy positions. Earliest supported date is 1999-01-04.
+      parameters:
+        - name: date
+          in: path
+          required: true
+          description: ISO date (YYYY-MM-DD). Earliest supported is 1999-01-04.
+          schema:
+            type: string
+            format: date
+            example: "2024-01-15"
+        - name: base
+          in: query
+          required: true
+          description: Source currency code.
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+            example: "USD"
+        - name: symbols
+          in: query
+          required: false
+          description: Target currency code.
+          schema:
+            type: string
+            example: "INR"
+      responses:
+        '200':
+          description: Historical rate result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [amount, base, date, rates]
+                properties:
+                  amount:
+                    type: number
+                  base:
+                    type: string
+                  date:
+                    type: string
+                    format: date
+                  rates:
+                    type: object
+                    additionalProperties:
+                      type: number
+              examples:
+                usd_to_inr_historical:
+                  value:
+                    amount: 1
+                    base: "USD"
+                    date: "2024-01-15"
+                    rates:
+                      INR: 82.87
+
+components:
+  securitySchemes: {}
+
+x-finspark-chain:
+  description: |
+    Suggested call order for the LLM chain detector.
+  steps:
+    - id: list_supported
+      endpoint: listSupportedCurrencies
+      extract:
+        - "$.INR"
+        - "$.USD"
+      purpose: Verify the currency pair is supported before issuing conversion calls.
+    - id: convert_today
+      endpoint: getLatestExchangeRate
+      depends_on: list_supported
+      extract:
+        - "$.rates.INR"
+        - "$.date"
+      purpose: Get today's USD to INR rate for the disbursement.
+    - id: convert_historical
+      endpoint: getHistoricalExchangeRate
+      depends_on: list_supported
+      purpose: Pull the historical rate for quarter-end reconciliation.
+
+x-finspark-business-context:
+  workflow: cross_border_loan_disbursement
+  trigger_event: borrower.disbursement.requested
+  retry_policy:
+    max_attempts: 3
+    backoff_seconds: [2, 4, 8]
+  fallback_behavior:
+    on_error: use_last_cached_rate
+    cache_ttl_hours: 24
+  sla_requirements:
+    response_time_ms: 1000
+    availability_target: "99.5%"
