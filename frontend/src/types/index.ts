@@ -185,6 +185,16 @@ export interface SimulationResults {
   duration_ms: number;
 }
 
+// Matches ValidateAndTestResponse Pydantic schema
+export interface ValidateAndTestResponse {
+  configuration_id: string;
+  phase: "validating" | "testing" | "done" | "error";
+  validation: Simulation;
+  testing: Simulation | null;
+  final_status: string;
+  error_message?: string | null;
+}
+
 // Matches AuditLogResponse Pydantic schema
 export interface AuditEntry {
   id: string;
