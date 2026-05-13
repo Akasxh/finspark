@@ -35,7 +35,6 @@ from finspark.models.adapter import Adapter, AdapterVersion
 from finspark.models.configuration import Configuration
 from finspark.models.simulation import Simulation
 
-
 # ---------------------------------------------------------------------------
 # DB seeding helpers -- intentionally lightweight; the audit assertions are
 # the load-bearing tests and don't need adapter rows.

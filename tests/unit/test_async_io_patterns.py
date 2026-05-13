@@ -5,7 +5,6 @@ asyncio.to_thread so they do not block the event loop.
 """
 
 import ast
-import inspect
 from pathlib import Path
 
 import pytest

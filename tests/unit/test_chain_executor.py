@@ -27,7 +27,6 @@ from finspark.services.chain.executor import topological_sort
 from finspark.services.chain.jsonpath import set_path
 from finspark.services.simulation.simulator import MockAPIServer
 
-
 # ---------------------------------------------------------------------------
 # is_chain detection
 # ---------------------------------------------------------------------------

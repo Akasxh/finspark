@@ -33,7 +33,6 @@ from finspark.mcp.service import MCP_TENANT_ID
 from finspark.models.adapter import Adapter, AdapterVersion
 from finspark.models.configuration import Configuration
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -65,10 +64,12 @@ async def test_stdio_server_lists_three_tools_over_real_subprocess(
         cwd=str(REPO_ROOT),
     )
 
-    async with stdio_client(params) as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            await asyncio.wait_for(session.initialize(), timeout=20)
-            listed = await asyncio.wait_for(session.list_tools(), timeout=10)
+    async with (
+        stdio_client(params) as (read_stream, write_stream),
+        ClientSession(read_stream, write_stream) as session,
+    ):
+        await asyncio.wait_for(session.initialize(), timeout=20)
+        listed = await asyncio.wait_for(session.list_tools(), timeout=10)
 
     tool_names = {tool.name for tool in listed.tools}
     assert tool_names == set(TOOL_NAMES), (
@@ -228,10 +229,10 @@ async def test_invoke_matches_simulations_run_step_for_step(
         class _Factory:
             def __call__(self):
                 class _Ctx:
-                    async def __aenter__(self_inner):
+                    async def __aenter__(self):
                         return db_session
 
-                    async def __aexit__(self_inner, *exc):
+                    async def __aexit__(self, *exc):
                         return False
 
                 return _Ctx()

@@ -25,7 +25,6 @@ from finspark.schemas.documents import (
     ParsedDocumentResult,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -86,10 +85,10 @@ async def patch_session_factory(db_session):
     class _Factory:
         def __call__(self):
             class _Ctx:
-                async def __aenter__(self_inner):
+                async def __aenter__(self):
                     return db_session
 
-                async def __aexit__(self_inner, *exc):
+                async def __aexit__(self, *exc):
                     return False
 
             return _Ctx()

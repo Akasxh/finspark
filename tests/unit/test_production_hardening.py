@@ -16,8 +16,7 @@ import httpx
 import pytest
 
 from finspark.core.logging_filter import PIIMaskingFilter
-from finspark.services.llm.client import GeminiClient, _shared_client, get_llm_client
-
+from finspark.services.llm.client import GeminiClient, get_llm_client
 
 # ---------------------------------------------------------------------------
 # Issue #51 — Global exception handler
@@ -127,9 +126,8 @@ class TestGeminiKeyRedaction:
         ):
             from finspark.services.llm.client import GeminiAPIError
 
-            with caplog.at_level(logging.ERROR):
-                with pytest.raises(GeminiAPIError):
-                    await c.generate("test")
+            with caplog.at_level(logging.ERROR), pytest.raises(GeminiAPIError):
+                await c.generate("test")
 
             # API key must not appear in any log record
             for record in caplog.records:
@@ -245,7 +243,6 @@ class TestGeminiClientLifecycle:
             mod._shared_client = None
             runtime_settings.llm_provider = "gemini"
             with patch.object(mod, "GeminiClient") as mock_cls:
-                mock_instance = mock_cls.return_value
                 c1 = get_llm_client()
                 c2 = get_llm_client()
                 assert c1 is c2
@@ -262,7 +259,7 @@ class TestGeminiClientLifecycle:
         mock_client = AsyncMock()
         mod._shared_client = mock_client
         try:
-            from finspark.main import lifespan, app
+            from finspark.main import app, lifespan
 
             # We need to mock init_db / seed_adapters / seed_admin_user so
             # the lifespan does not touch the real on-disk SQLite DB during

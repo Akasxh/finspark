@@ -24,7 +24,6 @@ from finspark.services.transformation import (
     validate_expression,
 )
 
-
 # ---------------------------------------------------------------------------
 # Persona acceptance test
 # ---------------------------------------------------------------------------

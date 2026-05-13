@@ -89,6 +89,7 @@ const TRANSITION_BUTTONS: Record<
   validating: [{ label: "Run Tests", icon: PlayCircle, targetState: "__pipeline__" }],
   testing: [{ label: "Deploy", icon: Rocket, targetState: "active" }],
 };
+type TransitionAction = (typeof TRANSITION_BUTTONS)[string][number];
 
 const TRANSFORM_OPTIONS = [
   "none", "upper", "lower", "parse_number", "parse_date",
@@ -162,7 +163,7 @@ function StatusStepper({ status }: { status: string }) {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
               <div style={{
                 width: 10, height: 10, borderRadius: "50%", background: dotColor,
-                boxShadow: isCurrent ? `0 0 0 3px rgba(45, 143, 206, 0.2)` : "none",
+                boxShadow: isCurrent ? "0 0 0 3px rgba(45, 143, 206, 0.2)" : "none",
                 transition: "all 150ms ease",
               }} />
               <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: labelColor, whiteSpace: "nowrap" }}>
@@ -342,6 +343,7 @@ function MappingsTable({ cfg }: { cfg: Configuration }) {
   const [mappings, setMappings] = useState<FieldMapping[]>(() => cfg.field_mappings.map((fm) => ({ ...fm })));
   const [isDirty, setIsDirty] = useState(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset local edits only when switching config/version
   useEffect(() => {
     setMappings(cfg.field_mappings.map((fm) => ({ ...fm })));
     setIsDirty(false);
@@ -1254,10 +1256,10 @@ function GenerateForm({ onDone }: { onDone: () => void }) {
 
       <form onSubmit={handleSubmit} style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginTop: 16 }}>
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+          <label htmlFor="config-document-id" style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
             Document
           </label>
-          <select value={documentId} onChange={(e) => handleDocumentChange(e.target.value)} style={inputStyle} onFocus={focusStyle} onBlur={blurStyle}>
+          <select id="config-document-id" value={documentId} onChange={(e) => handleDocumentChange(e.target.value)} style={inputStyle} onFocus={focusStyle} onBlur={blurStyle}>
             <option value="">Select document...</option>
             {docs.map((doc) => (
               <option key={doc.id} value={doc.id}>{doc.filename} ({doc.status})</option>
@@ -1266,20 +1268,21 @@ function GenerateForm({ onDone }: { onDone: () => void }) {
         </div>
 
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+          <label htmlFor="config-adapter-id" style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
             Adapter
           </label>
-          <select value={selectedAdapterId} onChange={(e) => handleAdapterChange(e.target.value)} style={inputStyle} onFocus={focusStyle} onBlur={blurStyle}>
+          <select id="config-adapter-id" value={selectedAdapterId} onChange={(e) => handleAdapterChange(e.target.value)} style={inputStyle} onFocus={focusStyle} onBlur={blurStyle}>
             <option value="">Select adapter...</option>
             {adapters.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </div>
 
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+          <label htmlFor="config-adapter-version-id" style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
             Version
           </label>
           <select
+            id="config-adapter-version-id"
             value={adapterVersionId}
             onChange={(e) => setAdapterVersionId(e.target.value)}
             disabled={!selectedAdapter}
@@ -1294,10 +1297,11 @@ function GenerateForm({ onDone }: { onDone: () => void }) {
         </div>
 
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
+          <label htmlFor="config-name" style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 6 }}>
             Name
           </label>
           <input
+            id="config-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -1568,6 +1572,29 @@ export default function Configurations() {
     },
   });
 
+  function isTransitionBusy(action: TransitionAction, configId: string) {
+    if (action.targetState === "__pipeline__") {
+      return runPipelineMutation.isPending && pipeline?.configId === configId;
+    }
+    return transitionMutation.isPending;
+  }
+
+  function handleTransitionClick(
+    e: React.MouseEvent<HTMLButtonElement>,
+    action: TransitionAction,
+    cfg: Configuration
+  ) {
+    e.stopPropagation();
+    if (action.targetState === "__pipeline__") {
+      runPipelineMutation.mutate({ id: cfg.id, name: cfg.name });
+      return;
+    }
+    if (action.targetState === "active" && !window.confirm(`Deploy "${cfg.name}" to production?`)) {
+      return;
+    }
+    transitionMutation.mutate({ id: cfg.id, targetState: action.targetState });
+  }
+
   const configs: Configuration[] = data?.data ?? [];
 
   return (
@@ -1634,46 +1661,52 @@ export default function Configurations() {
             return (
               <div key={cfg.id} className="card" style={{ overflow: "hidden" }}>
                 {/* Row header */}
-                <button
-                  type="button"
+                <div
                   style={{
                     display: "flex", width: "100%", alignItems: "center", gap: 16,
-                    padding: "14px 20px", textAlign: "left", background: "transparent", cursor: "pointer",
+                    padding: "14px 20px", background: "transparent",
                     transition: "background 100ms ease",
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-raised)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                  onClick={() => setExpandedId(isExpanded ? null : cfg.id)}
                 >
-                  <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--color-bg-raised)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <Settings style={{ width: 16, height: 16, color: "var(--color-text-muted)" }} />
-                  </div>
+                  <button
+                    type="button"
+                    style={{ display: "flex", flex: 1, minWidth: 0, alignItems: "center", gap: 16, textAlign: "left", background: "transparent", cursor: "pointer" }}
+                    onClick={() => setExpandedId(isExpanded ? null : cfg.id)}
+                  >
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--color-bg-raised)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Settings style={{ width: 16, height: 16, color: "var(--color-text-muted)" }} />
+                    </div>
 
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-primary)" }}>{cfg.name}</span>
-                      <span className={st.cls}>{st.label}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-primary)" }}>{cfg.name}</span>
+                        <span className={st.cls}>{st.label}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "var(--color-text-muted)" }}>
+                        <span className="mono" style={{ fontSize: 12 }}>v{cfg.version}</span>
+                        <span>·</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <Clock style={{ width: 11, height: 11 }} />
+                          {fmtDate(cfg.updated_at)}
+                        </span>
+                        <span>·</span>
+                        <span>{cfg.field_mappings.length} mappings</span>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "var(--color-text-muted)" }}>
-                      <span className="mono" style={{ fontSize: 12 }}>v{cfg.version}</span>
-                      <span>·</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <Clock style={{ width: 11, height: 11 }} />
-                        {fmtDate(cfg.updated_at)}
-                      </span>
-                      <span>·</span>
-                      <span>{cfg.field_mappings.length} mappings</span>
-                    </div>
-                  </div>
+
+                    <ChevronDown style={{
+                      width: 15, height: 15, color: "var(--color-text-muted)", flexShrink: 0,
+                      transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 150ms ease",
+                    }} />
+                  </button>
 
                   {/* Lifecycle transition buttons + delete */}
-                  <div style={{ display: "flex", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ display: "flex", gap: 8 }}>
                     {transitions.map((t) => {
                       const TIcon = t.icon;
-                      const isPipeline = t.targetState === "__pipeline__";
-                      const busy = isPipeline
-                        ? runPipelineMutation.isPending && pipeline?.configId === cfg.id
-                        : transitionMutation.isPending;
+                      const busy = isTransitionBusy(t, cfg.id);
                       return (
                         <button
                           key={t.targetState + cfg.status}
@@ -1681,14 +1714,7 @@ export default function Configurations() {
                           className="btn-secondary"
                           style={{ fontSize: 11, padding: "5px 10px" }}
                           disabled={busy || runPipelineMutation.isPending}
-                          onClick={() => {
-                            if (isPipeline) {
-                              runPipelineMutation.mutate({ id: cfg.id, name: cfg.name });
-                              return;
-                            }
-                            if (t.targetState === "active" && !window.confirm(`Deploy "${cfg.name}" to production?`)) return;
-                            transitionMutation.mutate({ id: cfg.id, targetState: t.targetState });
-                          }}
+                          onClick={(e) => handleTransitionClick(e, t, cfg)}
                         >
                           {busy ? (
                             <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
@@ -1703,18 +1729,16 @@ export default function Configurations() {
                       type="button"
                       className="btn-secondary"
                       style={{ fontSize: 11, padding: "5px 8px", color: "var(--color-error-text)" }}
-                      onClick={() => setConfirmDelete(cfg)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDelete(cfg);
+                      }}
                       aria-label={`Delete ${cfg.name}`}
                     >
                       <Trash2 style={{ width: 12, height: 12 }} />
                     </button>
                   </div>
-
-                  <ChevronDown style={{
-                    width: 15, height: 15, color: "var(--color-text-muted)", flexShrink: 0,
-                    transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 150ms ease",
-                  }} />
-                </button>
+                </div>
 
                 {/* Inline pipeline progress — only renders for the config that ran it */}
                 {pipeline && pipeline.configId === cfg.id && (
@@ -1739,6 +1763,7 @@ export default function Configurations() {
             background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center",
           }}
           onClick={(e) => { if (e.target === e.currentTarget) setConfirmDelete(null); }}
+          onKeyDown={(e) => { if (e.key === "Escape") setConfirmDelete(null); }}
         >
           <div className="card" style={{ padding: 24, maxWidth: 420, width: "90%" }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-primary)", marginBottom: 8 }}>

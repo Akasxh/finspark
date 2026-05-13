@@ -169,13 +169,13 @@ class DocumentParser:
 
         Falls back to the regex-based ``parse_text()`` on any error.
         """
-        _SYSTEM_INSTRUCTION = (
+        system_instruction = (
             "You are an expert at extracting structured integration requirements from "
             "enterprise documents (BRDs, SOWs, API specs, technical specifications) "
             "for Indian financial services. Extract every API endpoint, field definition, "
             "authentication requirement, and service identifier present in the document."
         )
-        _PROMPT = """Analyze the following document and extract ALL structured information.
+        prompt_template = """Analyze the following document and extract ALL structured information.
 
 Document filename: {filename}
 Document text:
@@ -215,10 +215,10 @@ Rules:
         doc_type = self._normalize_doc_type("brd")
 
         try:
-            prompt = _PROMPT.format(filename=filename, text=truncated)
+            prompt = prompt_template.format(filename=filename, text=truncated)
             llm_data: dict[str, Any] = await client.generate_json(
                 prompt,
-                system_instruction=_SYSTEM_INSTRUCTION,
+                system_instruction=system_instruction,
                 temperature=0.1,
                 max_tokens=8192,
             )
@@ -705,7 +705,7 @@ Rules:
         return sla
 
     def _extract_title(self, text: str) -> str:
-        _SEPARATOR_RE = re.compile(r"^[|\-#=~\s]+$")
+        separator_re = re.compile(r"^[|\-#=~\s]+$")
         lines = text.strip().split("\n")
         for line in lines[:5]:
             line = line.strip()
@@ -714,7 +714,7 @@ Rules:
             # Skip table separators and markdown heading/rule characters
             if line[0] in ("|", "-", "#", "=", "~"):
                 continue
-            if _SEPARATOR_RE.match(line):
+            if separator_re.match(line):
                 continue
             if len(line) > 10 and len(line) < 200:
                 return line
