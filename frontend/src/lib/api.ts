@@ -2,6 +2,7 @@ import type {
   APIResponse,
   Adapter,
   AdapterListResponse,
+  AdapterSuggestResponse,
   AuditEntry,
   ConfigDiffResponse,
   ConfigHistoryEntry,
@@ -149,6 +150,12 @@ export const adaptersApi = {
     api
       .post<APIResponse<Adapter>>("/api/v1/adapters/from-document", null, {
         params: { document_id: documentId, name, category },
+      })
+      .then((r) => r.data),
+  suggest: (documentId: string) =>
+    api
+      .post<APIResponse<AdapterSuggestResponse>>("/api/v1/adapters/suggest", {
+        document_id: documentId,
       })
       .then((r) => r.data),
 };

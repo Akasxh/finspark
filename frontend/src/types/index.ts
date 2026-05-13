@@ -241,6 +241,22 @@ export interface DeprecationInfo {
   migration_guide: Array<{ action: string; description: string }>;
 }
 
+export interface AdapterSuggestMatch {
+  adapter_id: string;
+  version_id: string;
+  adapter_name: string;
+  version: string;
+  category: string;
+  score: number;
+  reason: string;
+}
+
+export interface AdapterSuggestResponse {
+  matches: AdapterSuggestMatch[];
+  suggest_custom: boolean;
+  threshold: number;
+}
+
 export interface SearchResult {
   type: string;
   id: string;
